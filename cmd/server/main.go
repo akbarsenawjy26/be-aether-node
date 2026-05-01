@@ -106,6 +106,8 @@ func main() {
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc)
 	authHandler := handler.NewAuthHandler(authSvc)
 	telemetryHandler := handler.NewTelemetryHandler(telemetrySvc)
+	healthChecker := handler.NewHealthChecker(pgPool, cfg.InfluxDB.URL, cfg.InfluxDB.Token)
+	healthHandler := handler.NewHealthHandler(healthChecker)
 
 	// Setup Echo
 	e := echo.New()
@@ -118,10 +120,10 @@ func main() {
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 	}))
 
-	// Health check
-	e.GET("/health", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
-	})
+	// Health check endpoints
+	e.GET("/health", healthHandler.GetHealth)
+	e.GET("/health/live", healthHandler.Liveness)
+	e.GET("/health/ready", healthHandler.Readiness)
 
 	// Auth routes (public)
 	authGroup := e.Group("/auth")

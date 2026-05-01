@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,6 +10,8 @@ import (
 
 	"aether-node/config"
 	"aether-node/internal/db"
+	"aether-node/pkg/logger"
+	"aether-node/pkg/middleware"
 
 	apikeyRepo "aether-node/internal/repository/apikey"
 	authRepo "aether-node/internal/repository/auth"
@@ -39,26 +40,30 @@ func main() {
 	// Load configuration from environment
 	cfg := config.MustLoad()
 
+	// Initialize structured logger
+	logger.Init(cfg.Server.LogLevel, cfg.Server.LogJSON)
+	log := logger.Get()
+
 	// PostgreSQL connection pool
 	pgPool, err := pgxpool.New(context.Background(), cfg.Database.DSN())
 	if err != nil {
-		log.Fatalf("Unable to connect to PostgreSQL: %v", err)
+		log.Fatal().Err(err).Msg("Unable to connect to PostgreSQL")
 	}
 	defer pgPool.Close()
 
 	// Ping PostgreSQL to verify connection
 	if err := pgPool.Ping(context.Background()); err != nil {
-		log.Fatalf("PostgreSQL ping failed: %v", err)
+		log.Fatal().Err(err).Msg("PostgreSQL ping failed")
 	}
-	log.Println("Connected to PostgreSQL")
+	log.Info().Str("component", "postgres").Msg("Connected to PostgreSQL")
 
 	// Verify InfluxDB connectivity via HTTP ping
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := pingInfluxDB(ctx, cfg.InfluxDB.URL, cfg.InfluxDB.Token); err != nil {
-		log.Printf("InfluxDB ping failed (non-fatal): %v", err)
+		log.Warn().Err(err).Str("component", "influxdb").Msg("InfluxDB ping failed (non-fatal)")
 	} else {
-		log.Println("Connected to InfluxDB")
+		log.Info().Str("component", "influxdb").Msg("Connected to InfluxDB")
 	}
 
 	// Create db.Queries from pool for type-safe SQL operations
@@ -106,7 +111,7 @@ func main() {
 	e := echo.New()
 
 	// Middleware
-	e.Use(echomiddleware.Logger())
+	e.Use(middleware.RequestLogger())
 	e.Use(echomiddleware.Recover())
 	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
 		AllowOrigins: cfg.Server.CORSOrigins(),
@@ -181,7 +186,7 @@ func main() {
 	// Graceful shutdown
 	go func() {
 		if err := e.Start(cfg.Server.Address()); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			log.Fatal().Err(err).Str("component", "server").Msg("Server error")
 		}
 	}()
 
@@ -189,15 +194,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	log.Info().Str("component", "server").Msg("Shutting down server...")
 	ctx, cancel = context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeoutDuration())
 	defer cancel()
 
 	if err := e.Shutdown(ctx); err != nil {
-		log.Fatalf("Server shutdown error: %v", err)
+		log.Fatal().Err(err).Str("component", "server").Msg("Server shutdown error")
 	}
 
-	log.Println("Server stopped")
+	log.Info().Str("component", "server").Msg("Server stopped")
 }
 
 // pingInfluxDB checks InfluxDB connectivity via HTTP API

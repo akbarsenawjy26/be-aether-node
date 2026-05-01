@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrDeviceNotFound = errors.New("device not found")
@@ -19,8 +18,8 @@ type deviceRepository struct {
 	db *db.Queries
 }
 
-func NewDeviceRepository(pool *pgxpool.Pool) domainDevice.DeviceRepository {
-	return &deviceRepository{db: db.New(pool)}
+func NewDeviceRepository(queries *db.Queries) domainDevice.DeviceRepository {
+	return &deviceRepository{db: queries}
 }
 
 func (r *deviceRepository) Create(ctx context.Context, device *domainDevice.Device) error {

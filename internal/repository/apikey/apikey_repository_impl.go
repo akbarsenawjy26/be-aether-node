@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
@@ -24,8 +23,8 @@ type apiKeyRepository struct {
 	db *db.Queries
 }
 
-func NewAPIKeyRepository(pool *pgxpool.Pool) domainAPIKey.APIKeyRepository {
-	return &apiKeyRepository{db: db.New(pool)}
+func NewAPIKeyRepository(queries *db.Queries) domainAPIKey.APIKeyRepository {
+	return &apiKeyRepository{db: queries}
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, apiKey *domainAPIKey.APIKey) error {

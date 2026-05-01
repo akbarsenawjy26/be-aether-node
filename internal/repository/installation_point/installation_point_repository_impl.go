@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -20,8 +19,8 @@ type installationPointRepository struct {
 	db *db.Queries
 }
 
-func NewInstallationPointRepository(pool *pgxpool.Pool) domainIP.InstallationPointRepository {
-	return &installationPointRepository{db: db.New(pool)}
+func NewInstallationPointRepository(queries *db.Queries) domainIP.InstallationPointRepository {
+	return &installationPointRepository{db: queries}
 }
 
 func (r *installationPointRepository) Create(ctx context.Context, ip *domainIP.InstallationPoint) error {

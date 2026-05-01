@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
@@ -22,8 +21,8 @@ type userRepository struct {
 	db *db.Queries
 }
 
-func NewUserRepository(pool *pgxpool.Pool) domainUser.UserRepository {
-	return &userRepository{db: db.New(pool)}
+func NewUserRepository(queries *db.Queries) domainUser.UserRepository {
+	return &userRepository{db: queries}
 }
 
 func (r *userRepository) Create(ctx context.Context, user *domainUser.User) error {

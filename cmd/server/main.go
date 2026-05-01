@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aether-node/config"
+	"aether-node/internal/db"
 
 	apikeyRepo "aether-node/internal/repository/apikey"
 	authRepo "aether-node/internal/repository/auth"
@@ -60,13 +61,16 @@ func main() {
 		log.Println("Connected to InfluxDB")
 	}
 
+	// Create db.Queries from pool for type-safe SQL operations
+	queries := db.New(pgPool)
+
 	// Initialize repositories
-	userRepo := userRepo.NewUserRepository(pgPool)
-	deviceRepo := deviceRepo.NewDeviceRepository(pgPool)
-	locationRepo := locationRepo.NewLocationRepository(pgPool)
-	installationPointRepo := installationPointRepo.NewInstallationPointRepository(pgPool)
-	apiKeyRepo := apikeyRepo.NewAPIKeyRepository(pgPool)
-	refreshTokenRepo := authRepo.NewRefreshTokenRepository(pgPool)
+	userRepo := userRepo.NewUserRepository(queries)
+	deviceRepo := deviceRepo.NewDeviceRepository(queries)
+	locationRepo := locationRepo.NewLocationRepository(queries)
+	installationPointRepo := installationPointRepo.NewInstallationPointRepository(queries)
+	apiKeyRepo := apikeyRepo.NewAPIKeyRepository(queries)
+	refreshTokenRepo := authRepo.NewRefreshTokenRepository(queries)
 	telemetryRepo := telemetryRepo.NewTelemetryRepository(
 		cfg.InfluxDB.URL, cfg.InfluxDB.Token,
 		cfg.InfluxDB.Org, cfg.InfluxDB.Bucket,
@@ -79,6 +83,8 @@ func main() {
 	installationPointSvc := installationPointSvc.NewInstallationPointService(installationPointRepo)
 	apiKeySvc := apikeySvc.NewAPIKeyService(apiKeyRepo, "aeth_live_pk_")
 	authSvc := authSvc.NewAuthService(
+		queries,
+		pgPool,
 		userRepo,
 		refreshTokenRepo,
 		cfg.JWT.Secret,

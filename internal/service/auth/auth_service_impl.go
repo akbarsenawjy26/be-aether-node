@@ -7,15 +7,21 @@ import (
 	"errors"
 	"time"
 
+	"aether-node/internal/db"
 	domainAuth "aether-node/internal/domain/auth"
 	userPkg "aether-node/internal/domain/user"
+	"aether-node/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type authService struct {
-	userRepo        userPkg.UserRepository
+	queries        *db.Queries
+	pool           *pgxpool.Pool
+	userRepo       userPkg.UserRepository
 	refreshTokenRepo domainAuth.RefreshTokenRepository
 	jwtSecret       []byte
 	accessTokenTTL  time.Duration
@@ -23,6 +29,8 @@ type authService struct {
 }
 
 func NewAuthService(
+	queries *db.Queries,
+	pool *pgxpool.Pool,
 	userRepo userPkg.UserRepository,
 	refreshTokenRepo domainAuth.RefreshTokenRepository,
 	jwtSecret string,
@@ -30,7 +38,9 @@ func NewAuthService(
 	refreshTokenTTL time.Duration,
 ) domainAuth.AuthService {
 	return &authService{
-		userRepo:        userRepo,
+		queries:        queries,
+		pool:           pool,
+		userRepo:       userRepo,
 		refreshTokenRepo: refreshTokenRepo,
 		jwtSecret:       []byte(jwtSecret),
 		accessTokenTTL:  accessTokenTTL,
@@ -111,7 +121,40 @@ func (s *authService) Register(ctx context.Context, req *domainAuth.RegisterRequ
 		IsActive:     true,
 	}
 
-	if err := s.userRepo.Create(ctx, u); err != nil {
+	// Start transaction for atomic user + refresh token creation
+	txHelper := repository.NewTransaction(s.pool)
+	txQueries, cleanup, err := txHelper.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup(false) // rollback by default
+
+	// Create user using transaction-scoped queries
+	// We need to use txQueries directly since the repository stores *db.Queries
+	// and our concrete repositories use db.Queries which has WithTx
+	if err := createUserWithQueries(ctx, txQueries, u); err != nil {
+		return nil, err
+	}
+
+	// Generate refresh token
+	refreshToken, err := s.generateRefreshToken()
+	if err != nil {
+		return nil, err
+	}
+
+	tokenHash := hashToken(refreshToken)
+	refreshTokenRecord := &domainAuth.RefreshToken{
+		UserGUID:  u.GUID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().Add(s.refreshTokenTTL),
+	}
+
+	if err := createRefreshTokenWithQueries(ctx, txQueries, refreshTokenRecord); err != nil {
+		return nil, err
+	}
+
+	// Commit transaction
+	if err := cleanup(true); err != nil {
 		return nil, err
 	}
 
@@ -121,6 +164,55 @@ func (s *authService) Register(ctx context.Context, req *domainAuth.RegisterRequ
 		FirstName: u.FirstName,
 		LastName:  u.LastName,
 	}, nil
+}
+
+// createUserWithQueries creates a user directly using *db.Queries (for transaction support)
+func createUserWithQueries(ctx context.Context, queries *db.Queries, user *userPkg.User) error {
+	if user.GUID == "" {
+		user.GUID = uuid.New().String()
+	}
+
+	guid, _ := uuid.Parse(user.GUID)
+	now := time.Now()
+
+	params := db.CreateUserParams{
+		Guid:         db.NewUUID(guid),
+		Email:        user.Email,
+		PasswordHash: user.PasswordHash,
+		FirstName:    user.FirstName,
+		LastName:     user.LastName,
+		IsActive:     user.IsActive,
+		CreatedAt:    db.NewTimestamptz(now),
+		UpdatedAt:    db.NewTimestamptz(now),
+	}
+
+	if user.RoleGUID != nil {
+		id, _ := uuid.Parse(*user.RoleGUID)
+		params.RoleGuid = db.NewUUID(id)
+	}
+
+	return queries.CreateUser(ctx, params)
+}
+
+// createRefreshTokenWithQueries creates a refresh token directly using *db.Queries (for transaction support)
+func createRefreshTokenWithQueries(ctx context.Context, queries *db.Queries, token *domainAuth.RefreshToken) error {
+	if token.GUID == "" {
+		token.GUID = uuid.New().String()
+	}
+
+	guid, _ := uuid.Parse(token.GUID)
+	userGUID, _ := uuid.Parse(token.UserGUID)
+	now := time.Now()
+
+	params := db.CreateRefreshTokenParams{
+		Guid:      db.NewUUID(guid),
+		UserGuid:  db.NewUUID(userGUID),
+		TokenHash: token.TokenHash,
+		ExpiresAt: db.NewTimestamptz(token.ExpiresAt),
+		CreatedAt: db.NewTimestamptz(now),
+	}
+
+	return queries.CreateRefreshToken(ctx, params)
 }
 
 func (s *authService) ForgotPassword(ctx context.Context, req *domainAuth.ForgotPasswordRequest) error {

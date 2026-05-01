@@ -12,15 +12,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type refreshTokenRepository struct {
 	db *db.Queries
 }
 
-func NewRefreshTokenRepository(pool *pgxpool.Pool) domainAuth.RefreshTokenRepository {
-	return &refreshTokenRepository{db: db.New(pool)}
+func NewRefreshTokenRepository(queries *db.Queries) domainAuth.RefreshTokenRepository {
+	return &refreshTokenRepository{db: queries}
 }
 
 func (r *refreshTokenRepository) Create(ctx context.Context, token *domainAuth.RefreshToken) error {

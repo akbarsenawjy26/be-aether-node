@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrLocationNotFound = errors.New("location not found")
@@ -19,8 +18,8 @@ type locationRepository struct {
 	db *db.Queries
 }
 
-func NewLocationRepository(pool *pgxpool.Pool) domainLocation.LocationRepository {
-	return &locationRepository{db: db.New(pool)}
+func NewLocationRepository(queries *db.Queries) domainLocation.LocationRepository {
+	return &locationRepository{db: queries}
 }
 
 func (r *locationRepository) Create(ctx context.Context, loc *domainLocation.Location) error {

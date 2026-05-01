@@ -2,12 +2,13 @@ package auth
 
 import (
 	"context"
-	domainAuth "aether-node/internal/domain/auth"
-
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"time"
+
+	"aether-node/internal/db"
+	domainAuth "aether-node/internal/domain/auth"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,11 +16,11 @@ import (
 )
 
 type refreshTokenRepository struct {
-	db *pgxpool.Pool
+	db *db.Queries
 }
 
-func NewRefreshTokenRepository(db *pgxpool.Pool) domainAuth.RefreshTokenRepository {
-	return &refreshTokenRepository{db: db}
+func NewRefreshTokenRepository(pool *pgxpool.Pool) domainAuth.RefreshTokenRepository {
+	return &refreshTokenRepository{db: db.New(pool)}
 }
 
 func (r *refreshTokenRepository) Create(ctx context.Context, token *domainAuth.RefreshToken) error {
@@ -27,78 +28,56 @@ func (r *refreshTokenRepository) Create(ctx context.Context, token *domainAuth.R
 		token.GUID = uuid.New().String()
 	}
 
-	query := `
-		INSERT INTO refresh_tokens (guid, user_guid, token_hash, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, $5)
-	`
-
+	guid, _ := uuid.Parse(token.GUID)
+	userGUID, _ := uuid.Parse(token.UserGUID)
 	now := time.Now()
-	_, err := r.db.Exec(ctx, query,
-		token.GUID,
-		token.UserGUID,
-		token.TokenHash,
-		token.ExpiresAt,
-		now,
-	)
 
-	return err
+	params := db.CreateRefreshTokenParams{
+		Guid:      db.NewUUID(guid),
+		UserGuid:  db.NewUUID(userGUID),
+		TokenHash: token.TokenHash,
+		ExpiresAt: db.NewTimestamptz(token.ExpiresAt),
+		CreatedAt: db.NewTimestamptz(now),
+	}
+
+	return r.db.CreateRefreshToken(ctx, params)
 }
 
 func (r *refreshTokenRepository) GetByTokenHash(ctx context.Context, tokenHash string) (*domainAuth.RefreshToken, error) {
-	query := `
-		SELECT guid, user_guid, token_hash, expires_at, created_at
-		FROM refresh_tokens
-		WHERE token_hash = $1
-	`
-
-	token := &domainAuth.RefreshToken{}
-	err := r.db.QueryRow(ctx, query, tokenHash).Scan(
-		&token.GUID,
-		&token.UserGUID,
-		&token.TokenHash,
-		&token.ExpiresAt,
-		&token.CreatedAt,
-	)
-
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, errors.New("refresh token not found")
-	}
+	dbToken, err := r.db.GetRefreshTokenByTokenHash(ctx, tokenHash)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("refresh token not found")
+		}
 		return nil, err
 	}
 
-	// Check if expired
-	if time.Now().After(token.ExpiresAt) {
+	rt := db.RefreshTokenFromDB(&dbToken)
+
+	if time.Now().After(rt.ExpiresAt) {
 		return nil, errors.New("refresh token expired")
 	}
 
-	return token, nil
+	return rt, nil
 }
 
 func (r *refreshTokenRepository) DeleteByUserGUID(ctx context.Context, userGUID string) error {
-	query := `DELETE FROM refresh_tokens WHERE user_guid = $1`
-	_, err := r.db.Exec(ctx, query, userGUID)
-	return err
+	id, _ := uuid.Parse(userGUID)
+	return r.db.DeleteRefreshTokensByUserGUID(ctx, db.NewUUID(id))
 }
 
 func (r *refreshTokenRepository) DeleteByTokenHash(ctx context.Context, tokenHash string) error {
-	query := `DELETE FROM refresh_tokens WHERE token_hash = $1`
-	_, err := r.db.Exec(ctx, query, tokenHash)
-	return err
+	return r.db.DeleteRefreshTokenByTokenHash(ctx, tokenHash)
 }
 
 func (r *refreshTokenRepository) DeleteExpired(ctx context.Context) error {
-	query := `DELETE FROM refresh_tokens WHERE expires_at < $1`
-	_, err := r.db.Exec(ctx, query, time.Now())
-	return err
+	return r.db.DeleteExpiredRefreshTokens(ctx, db.NewTimestamptz(time.Now()))
 }
 
 func (r *refreshTokenRepository) UpdateLastUsed(ctx context.Context, guid string, usedAt string) error {
-	// No-op for now - can be used to track token usage
 	return nil
 }
 
-// Helper function to hash a token
 func HashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:])

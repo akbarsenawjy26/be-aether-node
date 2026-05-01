@@ -2,10 +2,11 @@ package user
 
 import (
 	"context"
-	domainUser "aether-node/internal/domain/user"
-
-		"errors"
+	"errors"
 	"time"
+
+	"aether-node/internal/db"
+	domainUser "aether-node/internal/domain/user"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,11 +19,11 @@ var (
 )
 
 type userRepository struct {
-	db *pgxpool.Pool
+	db *db.Queries
 }
 
-func NewUserRepository(db *pgxpool.Pool) domainUser.UserRepository {
-	return &userRepository{db: db}
+func NewUserRepository(pool *pgxpool.Pool) domainUser.UserRepository {
+	return &userRepository{db: db.New(pool)}
 }
 
 func (r *userRepository) Create(ctx context.Context, user *domainUser.User) error {
@@ -30,87 +31,55 @@ func (r *userRepository) Create(ctx context.Context, user *domainUser.User) erro
 		user.GUID = uuid.New().String()
 	}
 
-	query := `
-		INSERT INTO users (guid, email, password_hash, first_name, last_name, role_guid, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`
-
+	guid, _ := uuid.Parse(user.GUID)
 	now := time.Now()
-	_, err := r.db.Exec(ctx, query,
-		user.GUID,
-		user.Email,
-		user.PasswordHash,
-		user.FirstName,
-		user.LastName,
-		user.RoleGUID,
-		true,
-		now,
-		now,
-	)
 
-	return err
+	params := db.CreateUserParams{
+		Guid:         db.NewUUID(guid),
+		Email:        user.Email,
+		PasswordHash: user.PasswordHash,
+		FirstName:    user.FirstName,
+		LastName:     user.LastName,
+		IsActive:     user.IsActive,
+		CreatedAt:    db.NewTimestamptz(now),
+		UpdatedAt:    db.NewTimestamptz(now),
+	}
+
+	if user.RoleGUID != nil {
+		id, _ := uuid.Parse(*user.RoleGUID)
+		params.RoleGuid = db.NewUUID(id)
+	}
+
+	return r.db.CreateUser(ctx, params)
 }
 
 func (r *userRepository) GetByGUID(ctx context.Context, guid string) (*domainUser.User, error) {
-	query := `
-		SELECT guid, email, password_hash, first_name, last_name, role_guid, is_active, created_at, updated_at, deleted_at
-		FROM users
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
-
-	user := &domainUser.User{}
-	err := r.db.QueryRow(ctx, query, guid).Scan(
-		&user.GUID,
-		&user.Email,
-		&user.PasswordHash,
-		&user.FirstName,
-		&user.LastName,
-		&user.RoleGUID,
-		&user.IsActive,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-		&user.DeletedAt,
-	)
-
-	if errors.Is(err, pgx.ErrNoRows) {
+	id, err := uuid.Parse(guid)
+	if err != nil {
 		return nil, ErrUserNotFound
 	}
+
+	dbUser, err := r.db.GetUserByGUID(ctx, db.NewUUID(id))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
 		return nil, err
 	}
 
-	return user, nil
+	return db.UserFromDB(&dbUser), nil
 }
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*domainUser.User, error) {
-	query := `
-		SELECT guid, email, password_hash, first_name, last_name, role_guid, is_active, created_at, updated_at, deleted_at
-		FROM users
-		WHERE email = $1 AND deleted_at IS NULL
-	`
-
-	user := &domainUser.User{}
-	err := r.db.QueryRow(ctx, query, email).Scan(
-		&user.GUID,
-		&user.Email,
-		&user.PasswordHash,
-		&user.FirstName,
-		&user.LastName,
-		&user.RoleGUID,
-		&user.IsActive,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-		&user.DeletedAt,
-	)
-
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrUserNotFound
-	}
+	dbUser, err := r.db.GetUserByEmail(ctx, email)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
 		return nil, err
 	}
 
-	return user, nil
+	return db.UserFromDB(&dbUser), nil
 }
 
 func (r *userRepository) List(ctx context.Context, params domainUser.ListParams) (*domainUser.ListResult, error) {
@@ -120,73 +89,27 @@ func (r *userRepository) List(ctx context.Context, params domainUser.ListParams)
 	if params.Page <= 0 {
 		params.Page = 1
 	}
-	if params.Order == "" {
-		params.Order = "created_at"
-	}
-	if params.Sort == "" {
-		params.Sort = "DESC"
-	}
 
+	search := "%" + params.Search + "%"
 	offset := (params.Page - 1) * params.Limit
 
-	// Count total
-	countQuery := `SELECT COUNT(*) FROM users WHERE deleted_at IS NULL`
-	args := []interface{}{}
-	argIdx := 1
-
-	if params.Search != "" {
-		countQuery += ` AND (email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1)`
-		args = append(args, "%"+params.Search+"%")
-		argIdx++
-	}
-
-	var total int64
-	err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total)
+	dbUsers, err := r.db.ListUsers(ctx, db.ListUsersParams{
+		Email:  search,
+		Limit:  int32(params.Limit),
+		Offset: int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Get data
-	query := `
-		SELECT guid, email, password_hash, first_name, last_name, role_guid, is_active, created_at, updated_at, deleted_at
-		FROM users
-		WHERE deleted_at IS NULL
-	`
-
-	if params.Search != "" {
-		query += ` AND (email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1)`
-	}
-
-	query += ` ORDER BY ` + params.Order + ` ` + params.Sort
-	query += ` LIMIT $` + string(rune('0'+argIdx)) + ` OFFSET $` + string(rune('0'+argIdx+1))
-
-	args = append(args, params.Limit, offset)
-
-	rows, err := r.db.Query(ctx, query, args...)
+	total, err := r.db.CountUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	users := make([]*domainUser.User, 0)
-	for rows.Next() {
-		user := &domainUser.User{}
-		err := rows.Scan(
-			&user.GUID,
-			&user.Email,
-			&user.PasswordHash,
-			&user.FirstName,
-			&user.LastName,
-			&user.RoleGUID,
-			&user.IsActive,
-			&user.CreatedAt,
-			&user.UpdatedAt,
-			&user.DeletedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, user)
+	users := make([]*domainUser.User, 0, len(dbUsers))
+	for i := range dbUsers {
+		users = append(users, db.UserFromDB(&dbUsers[i]))
 	}
 
 	totalPages := int(total) / params.Limit
@@ -204,64 +127,62 @@ func (r *userRepository) List(ctx context.Context, params domainUser.ListParams)
 }
 
 func (r *userRepository) Update(ctx context.Context, user *domainUser.User) error {
-	query := `
-		UPDATE users
-		SET email = $2, password_hash = $3, first_name = $4, last_name = $5, role_guid = $6, is_active = $7, updated_at = $8
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
+	guid, _ := uuid.Parse(user.GUID)
+	now := time.Now()
 
-	user.UpdatedAt = time.Now()
-	result, err := r.db.Exec(ctx, query,
-		user.GUID,
-		user.Email,
-		user.PasswordHash,
-		user.FirstName,
-		user.LastName,
-		user.RoleGUID,
-		user.IsActive,
-		user.UpdatedAt,
-	)
+	params := db.UpdateUserParams{
+		Guid:         db.NewUUID(guid),
+		Email:        user.Email,
+		PasswordHash: user.PasswordHash,
+		FirstName:    user.FirstName,
+		LastName:     user.LastName,
+		IsActive:     user.IsActive,
+		UpdatedAt:    db.NewTimestamptz(now),
+	}
 
+	if user.RoleGUID != nil {
+		id, _ := uuid.Parse(*user.RoleGUID)
+		params.RoleGuid = db.NewUUID(id)
+	}
+
+	err := r.db.UpdateUser(ctx, params)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
 		return err
 	}
-
-	if result.RowsAffected() == 0 {
-		return ErrUserNotFound
-	}
-
 	return nil
 }
 
 func (r *userRepository) Delete(ctx context.Context, guid string) error {
-	query := `
-		UPDATE users
-		SET deleted_at = $2, updated_at = $2
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
-
-	now := time.Now()
-	result, err := r.db.Exec(ctx, query, guid, now)
+	id, err := uuid.Parse(guid)
 	if err != nil {
-		return err
-	}
-
-	if result.RowsAffected() == 0 {
 		return ErrUserNotFound
 	}
 
+	err = r.db.DeleteUser(ctx, db.DeleteUserParams{
+		Guid:      db.NewUUID(id),
+		DeletedAt: db.NewTimestamptz(time.Now()),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return err
+	}
 	return nil
 }
 
 func (r *userRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	query := `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND deleted_at IS NULL)`
-	var exists bool
-	err := r.db.QueryRow(ctx, query, email).Scan(&exists)
-	return exists, err
+	exists, err := r.db.ExistsUserByEmail(ctx, email)
+	return bool(exists), err
 }
 
 func (r *userRepository) UpdateLastLogin(ctx context.Context, guid string, loginAt time.Time) error {
-	query := `UPDATE users SET updated_at = $2 WHERE guid = $1`
-	_, err := r.db.Exec(ctx, query, guid, loginAt)
-	return err
+	id, _ := uuid.Parse(guid)
+	return r.db.UpdateUserLastLogin(ctx, db.UpdateUserLastLoginParams{
+		Guid:      db.NewUUID(id),
+		UpdatedAt: db.NewTimestamptz(loginAt),
+	})
 }

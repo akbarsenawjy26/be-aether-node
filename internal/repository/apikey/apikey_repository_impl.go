@@ -2,27 +2,30 @@ package apikey
 
 import (
 	"context"
-	domainAPIKey "aether-node/internal/domain/apikey"
-
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"time"
+
+	"aether-node/internal/db"
+	domainAPIKey "aether-node/internal/domain/apikey"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrAPIKeyNotFound = errors.New("API key not found")
-var ErrAPIKeyInvalid = errors.New("invalid API key")
+var (
+	ErrAPIKeyNotFound = errors.New("API key not found")
+	ErrAPIKeyInvalid = errors.New("invalid API key")
+)
 
 type apiKeyRepository struct {
-	db *pgxpool.Pool
+	db *db.Queries
 }
 
-func NewAPIKeyRepository(db *pgxpool.Pool) domainAPIKey.APIKeyRepository {
-	return &apiKeyRepository{db: db}
+func NewAPIKeyRepository(pool *pgxpool.Pool) domainAPIKey.APIKeyRepository {
+	return &apiKeyRepository{db: db.New(pool)}
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, apiKey *domainAPIKey.APIKey) error {
@@ -30,81 +33,52 @@ func (r *apiKeyRepository) Create(ctx context.Context, apiKey *domainAPIKey.APIK
 		apiKey.GUID = uuid.New().String()
 	}
 
-	query := `
-		INSERT INTO api_keys (guid, key_hash, notes, expire_date, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`
-
+	guid, _ := uuid.Parse(apiKey.GUID)
 	now := time.Now()
-	_, err := r.db.Exec(ctx, query,
-		apiKey.GUID,
-		apiKey.KeyHash,
-		apiKey.Notes,
-		apiKey.ExpireDate,
-		apiKey.IsActive,
-		now,
-		now,
-	)
 
-	return err
+	params := db.CreateAPIKeyParams{
+		Guid:       db.NewUUID(guid),
+		KeyHash:    apiKey.KeyHash,
+		ExpireDate: db.NewTimestamptz(apiKey.ExpireDate),
+		IsActive:   apiKey.IsActive,
+		CreatedAt:  db.NewTimestamptz(now),
+		UpdatedAt:  db.NewTimestamptz(now),
+	}
+
+	if apiKey.Notes != "" {
+		params.Notes = db.NewText(apiKey.Notes)
+	}
+
+	return r.db.CreateAPIKey(ctx, params)
 }
 
 func (r *apiKeyRepository) GetByGUID(ctx context.Context, guid string) (*domainAPIKey.APIKey, error) {
-	query := `
-		SELECT guid, key_hash, notes, expire_date, is_active, created_at, updated_at, deleted_at
-		FROM api_keys
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
-
-	apiKey := &domainAPIKey.APIKey{}
-	err := r.db.QueryRow(ctx, query, guid).Scan(
-		&apiKey.GUID,
-		&apiKey.KeyHash,
-		&apiKey.Notes,
-		&apiKey.ExpireDate,
-		&apiKey.IsActive,
-		&apiKey.CreatedAt,
-		&apiKey.UpdatedAt,
-		&apiKey.DeletedAt,
-	)
-
-	if errors.Is(err, pgx.ErrNoRows) {
+	id, err := uuid.Parse(guid)
+	if err != nil {
 		return nil, ErrAPIKeyNotFound
 	}
+
+	dbKey, err := r.db.GetAPIKeyByGUID(ctx, db.NewUUID(id))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrAPIKeyNotFound
+		}
 		return nil, err
 	}
 
-	return apiKey, nil
+	return db.APIKeyFromDB(&dbKey), nil
 }
 
 func (r *apiKeyRepository) GetByKeyHash(ctx context.Context, keyHash string) (*domainAPIKey.APIKey, error) {
-	query := `
-		SELECT guid, key_hash, notes, expire_date, is_active, created_at, updated_at, deleted_at
-		FROM api_keys
-		WHERE key_hash = $1 AND deleted_at IS NULL
-	`
-
-	apiKey := &domainAPIKey.APIKey{}
-	err := r.db.QueryRow(ctx, query, keyHash).Scan(
-		&apiKey.GUID,
-		&apiKey.KeyHash,
-		&apiKey.Notes,
-		&apiKey.ExpireDate,
-		&apiKey.IsActive,
-		&apiKey.CreatedAt,
-		&apiKey.UpdatedAt,
-		&apiKey.DeletedAt,
-	)
-
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrAPIKeyNotFound
-	}
+	dbKey, err := r.db.GetAPIKeyByKeyHash(ctx, keyHash)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrAPIKeyNotFound
+		}
 		return nil, err
 	}
 
-	return apiKey, nil
+	return db.APIKeyFromDB(&dbKey), nil
 }
 
 func (r *apiKeyRepository) List(ctx context.Context, params domainAPIKey.ListParams) (*domainAPIKey.ListResult, error) {
@@ -114,71 +88,27 @@ func (r *apiKeyRepository) List(ctx context.Context, params domainAPIKey.ListPar
 	if params.Page <= 0 {
 		params.Page = 1
 	}
-	if params.Order == "" {
-		params.Order = "created_at"
-	}
-	if params.Sort == "" {
-		params.Sort = "DESC"
-	}
 
+	search := "%" + params.Search + "%"
 	offset := (params.Page - 1) * params.Limit
 
-	// Count total
-	countQuery := `SELECT COUNT(*) FROM api_keys WHERE deleted_at IS NULL`
-	args := []interface{}{}
-	argIdx := 1
-
-	if params.Search != "" {
-		countQuery += ` AND notes ILIKE $1`
-		args = append(args, "%"+params.Search+"%")
-		argIdx++
-	}
-
-	var total int64
-	err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total)
+	dbKeys, err := r.db.ListAPIKeys(ctx, db.ListAPIKeysParams{
+		Notes:  db.NewText(search),
+		Limit:  int32(params.Limit),
+		Offset: int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Get data
-	query := `
-		SELECT guid, key_hash, notes, expire_date, is_active, created_at, updated_at, deleted_at
-		FROM api_keys
-		WHERE deleted_at IS NULL
-	`
-
-	if params.Search != "" {
-		query += ` AND notes ILIKE $1`
-	}
-
-	query += ` ORDER BY ` + params.Order + ` ` + params.Sort
-	query += ` LIMIT $` + string(rune('0'+argIdx)) + ` OFFSET $` + string(rune('0'+argIdx+1))
-
-	args = append(args, params.Limit, offset)
-
-	rows, err := r.db.Query(ctx, query, args...)
+	total, err := r.db.CountAPIKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	apiKeys := make([]*domainAPIKey.APIKey, 0)
-	for rows.Next() {
-		ak := &domainAPIKey.APIKey{}
-		err := rows.Scan(
-			&ak.GUID,
-			&ak.KeyHash,
-			&ak.Notes,
-			&ak.ExpireDate,
-			&ak.IsActive,
-			&ak.CreatedAt,
-			&ak.UpdatedAt,
-			&ak.DeletedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		apiKeys = append(apiKeys, ak)
+	apiKeys := make([]*domainAPIKey.APIKey, 0, len(dbKeys))
+	for i := range dbKeys {
+		apiKeys = append(apiKeys, db.APIKeyFromDB(&dbKeys[i]))
 	}
 
 	totalPages := int(total) / params.Limit
@@ -196,54 +126,50 @@ func (r *apiKeyRepository) List(ctx context.Context, params domainAPIKey.ListPar
 }
 
 func (r *apiKeyRepository) Update(ctx context.Context, apiKey *domainAPIKey.APIKey) error {
-	query := `
-		UPDATE api_keys
-		SET notes = $2, expire_date = $3, is_active = $4, updated_at = $5
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
+	guid, _ := uuid.Parse(apiKey.GUID)
+	now := time.Now()
 
-	apiKey.UpdatedAt = time.Now()
-	result, err := r.db.Exec(ctx, query,
-		apiKey.GUID,
-		apiKey.Notes,
-		apiKey.ExpireDate,
-		apiKey.IsActive,
-		apiKey.UpdatedAt,
-	)
+	params := db.UpdateAPIKeyParams{
+		Guid:       db.NewUUID(guid),
+		ExpireDate: db.NewTimestamptz(apiKey.ExpireDate),
+		IsActive:   apiKey.IsActive,
+		UpdatedAt:  db.NewTimestamptz(now),
+	}
 
+	if apiKey.Notes != "" {
+		params.Notes = db.NewText(apiKey.Notes)
+	}
+
+	err := r.db.UpdateAPIKey(ctx, params)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAPIKeyNotFound
+		}
 		return err
 	}
-
-	if result.RowsAffected() == 0 {
-		return ErrAPIKeyNotFound
-	}
-
 	return nil
 }
 
 func (r *apiKeyRepository) Delete(ctx context.Context, guid string) error {
-	query := `
-		UPDATE api_keys
-		SET deleted_at = $2, updated_at = $2
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
-
-	now := time.Now()
-	result, err := r.db.Exec(ctx, query, guid, now)
+	id, err := uuid.Parse(guid)
 	if err != nil {
-		return err
-	}
-
-	if result.RowsAffected() == 0 {
 		return ErrAPIKeyNotFound
 	}
 
+	err = r.db.DeleteAPIKey(ctx, db.DeleteAPIKeyParams{
+		Guid:      db.NewUUID(id),
+		DeletedAt: db.NewTimestamptz(time.Now()),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAPIKeyNotFound
+		}
+		return err
+	}
 	return nil
 }
 
 func (r *apiKeyRepository) ValidateKey(ctx context.Context, key string) (*domainAPIKey.APIKey, error) {
-	// Hash the provided key
 	keyHash := sha256.Sum256([]byte(key))
 	keyHashStr := hex.EncodeToString(keyHash[:])
 
@@ -255,12 +181,10 @@ func (r *apiKeyRepository) ValidateKey(ctx context.Context, key string) (*domain
 		return nil, err
 	}
 
-	// Check if active
 	if !apiKey.IsActive {
 		return nil, ErrAPIKeyInvalid
 	}
 
-	// Check if expired
 	if time.Now().After(apiKey.ExpireDate) {
 		return nil, ErrAPIKeyInvalid
 	}

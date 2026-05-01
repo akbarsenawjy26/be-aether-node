@@ -2,10 +2,11 @@ package device
 
 import (
 	"context"
-	domainDevice "aether-node/internal/domain/device"
-
 	"errors"
 	"time"
+
+	"aether-node/internal/db"
+	domainDevice "aether-node/internal/domain/device"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,11 +16,11 @@ import (
 var ErrDeviceNotFound = errors.New("device not found")
 
 type deviceRepository struct {
-	db *pgxpool.Pool
+	db *db.Queries
 }
 
-func NewDeviceRepository(db *pgxpool.Pool) domainDevice.DeviceRepository {
-	return &deviceRepository{db: db}
+func NewDeviceRepository(pool *pgxpool.Pool) domainDevice.DeviceRepository {
+	return &deviceRepository{db: db.New(pool)}
 }
 
 func (r *deviceRepository) Create(ctx context.Context, device *domainDevice.Device) error {
@@ -27,84 +28,55 @@ func (r *deviceRepository) Create(ctx context.Context, device *domainDevice.Devi
 		device.GUID = uuid.New().String()
 	}
 
-	query := `
-		INSERT INTO devices (guid, type, serial_number, alias, notes, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`
-
+	guid, _ := uuid.Parse(device.GUID)
 	now := time.Now()
-	_, err := r.db.Exec(ctx, query,
-		device.GUID,
-		device.Type,
-		device.SerialNumber,
-		device.Alias,
-		device.Notes,
-		true,
-		now,
-		now,
-	)
 
-	return err
+	params := db.CreateDeviceParams{
+		Guid:         db.NewUUID(guid),
+		Type:         device.Type,
+		SerialNumber: device.SerialNumber,
+		IsActive:     device.IsActive,
+		CreatedAt:    db.NewTimestamptz(now),
+		UpdatedAt:    db.NewTimestamptz(now),
+	}
+
+	if device.Alias != "" {
+		params.Alias = db.NewText(device.Alias)
+	}
+	if device.Notes != "" {
+		params.Notes = db.NewText(device.Notes)
+	}
+
+	return r.db.CreateDevice(ctx, params)
 }
 
 func (r *deviceRepository) GetByGUID(ctx context.Context, guid string) (*domainDevice.Device, error) {
-	query := `
-		SELECT guid, type, serial_number, alias, notes, is_active, created_at, updated_at, deleted_at
-		FROM devices
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
-
-	device := &domainDevice.Device{}
-	err := r.db.QueryRow(ctx, query, guid).Scan(
-		&device.GUID,
-		&device.Type,
-		&device.SerialNumber,
-		&device.Alias,
-		&device.Notes,
-		&device.IsActive,
-		&device.CreatedAt,
-		&device.UpdatedAt,
-		&device.DeletedAt,
-	)
-
-	if errors.Is(err, pgx.ErrNoRows) {
+	id, err := uuid.Parse(guid)
+	if err != nil {
 		return nil, ErrDeviceNotFound
 	}
+
+	dbDevice, err := r.db.GetDeviceByGUID(ctx, db.NewUUID(id))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrDeviceNotFound
+		}
 		return nil, err
 	}
 
-	return device, nil
+	return db.DeviceFromDB(&dbDevice), nil
 }
 
 func (r *deviceRepository) GetBySerialNumber(ctx context.Context, serialNumber string) (*domainDevice.Device, error) {
-	query := `
-		SELECT guid, type, serial_number, alias, notes, is_active, created_at, updated_at, deleted_at
-		FROM devices
-		WHERE serial_number = $1 AND deleted_at IS NULL
-	`
-
-	device := &domainDevice.Device{}
-	err := r.db.QueryRow(ctx, query, serialNumber).Scan(
-		&device.GUID,
-		&device.Type,
-		&device.SerialNumber,
-		&device.Alias,
-		&device.Notes,
-		&device.IsActive,
-		&device.CreatedAt,
-		&device.UpdatedAt,
-		&device.DeletedAt,
-	)
-
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrDeviceNotFound
-	}
+	dbDevice, err := r.db.GetDeviceBySerialNumber(ctx, serialNumber)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrDeviceNotFound
+		}
 		return nil, err
 	}
 
-	return device, nil
+	return db.DeviceFromDB(&dbDevice), nil
 }
 
 func (r *deviceRepository) List(ctx context.Context, params domainDevice.ListParams) (*domainDevice.ListResult, error) {
@@ -114,72 +86,27 @@ func (r *deviceRepository) List(ctx context.Context, params domainDevice.ListPar
 	if params.Page <= 0 {
 		params.Page = 1
 	}
-	if params.Order == "" {
-		params.Order = "created_at"
-	}
-	if params.Sort == "" {
-		params.Sort = "DESC"
-	}
 
+	search := "%" + params.Search + "%"
 	offset := (params.Page - 1) * params.Limit
 
-	// Count total
-	countQuery := `SELECT COUNT(*) FROM devices WHERE deleted_at IS NULL`
-	args := []interface{}{}
-	argIdx := 1
-
-	if params.Search != "" {
-		countQuery += ` AND (serial_number ILIKE $1 OR alias ILIKE $1 OR type ILIKE $1)`
-		args = append(args, "%"+params.Search+"%")
-		argIdx++
-	}
-
-	var total int64
-	err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total)
+	dbDevices, err := r.db.ListDevices(ctx, db.ListDevicesParams{
+		SerialNumber: search,
+		Limit:        int32(params.Limit),
+		Offset:       int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Get data
-	query := `
-		SELECT guid, type, serial_number, alias, notes, is_active, created_at, updated_at, deleted_at
-		FROM devices
-		WHERE deleted_at IS NULL
-	`
-
-	if params.Search != "" {
-		query += ` AND (serial_number ILIKE $1 OR alias ILIKE $1 OR type ILIKE $1)`
-	}
-
-	query += ` ORDER BY ` + params.Order + ` ` + params.Sort
-	query += ` LIMIT $` + string(rune('0'+argIdx)) + ` OFFSET $` + string(rune('0'+argIdx+1))
-
-	args = append(args, params.Limit, offset)
-
-	rows, err := r.db.Query(ctx, query, args...)
+	total, err := r.db.CountDevices(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	devices := make([]*domainDevice.Device, 0)
-	for rows.Next() {
-		d := &domainDevice.Device{}
-		err := rows.Scan(
-			&d.GUID,
-			&d.Type,
-			&d.SerialNumber,
-			&d.Alias,
-			&d.Notes,
-			&d.IsActive,
-			&d.CreatedAt,
-			&d.UpdatedAt,
-			&d.DeletedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		devices = append(devices, d)
+	devices := make([]*domainDevice.Device, 0, len(dbDevices))
+	for i := range dbDevices {
+		devices = append(devices, db.DeviceFromDB(&dbDevices[i]))
 	}
 
 	totalPages := int(total) / params.Limit
@@ -197,57 +124,54 @@ func (r *deviceRepository) List(ctx context.Context, params domainDevice.ListPar
 }
 
 func (r *deviceRepository) Update(ctx context.Context, device *domainDevice.Device) error {
-	query := `
-		UPDATE devices
-		SET type = $2, serial_number = $3, alias = $4, notes = $5, is_active = $6, updated_at = $7
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
+	guid, _ := uuid.Parse(device.GUID)
+	now := time.Now()
 
-	device.UpdatedAt = time.Now()
-	result, err := r.db.Exec(ctx, query,
-		device.GUID,
-		device.Type,
-		device.SerialNumber,
-		device.Alias,
-		device.Notes,
-		device.IsActive,
-		device.UpdatedAt,
-	)
+	params := db.UpdateDeviceParams{
+		Guid:         db.NewUUID(guid),
+		Type:         device.Type,
+		SerialNumber: device.SerialNumber,
+		IsActive:     device.IsActive,
+		UpdatedAt:    db.NewTimestamptz(now),
+	}
 
+	if device.Alias != "" {
+		params.Alias = db.NewText(device.Alias)
+	}
+	if device.Notes != "" {
+		params.Notes = db.NewText(device.Notes)
+	}
+
+	err := r.db.UpdateDevice(ctx, params)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDeviceNotFound
+		}
 		return err
 	}
-
-	if result.RowsAffected() == 0 {
-		return ErrDeviceNotFound
-	}
-
 	return nil
 }
 
 func (r *deviceRepository) Delete(ctx context.Context, guid string) error {
-	query := `
-		UPDATE devices
-		SET deleted_at = $2, updated_at = $2
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
-
-	now := time.Now()
-	result, err := r.db.Exec(ctx, query, guid, now)
+	id, err := uuid.Parse(guid)
 	if err != nil {
-		return err
-	}
-
-	if result.RowsAffected() == 0 {
 		return ErrDeviceNotFound
 	}
 
+	err = r.db.DeleteDevice(ctx, db.DeleteDeviceParams{
+		Guid:      db.NewUUID(id),
+		DeletedAt: db.NewTimestamptz(time.Now()),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDeviceNotFound
+		}
+		return err
+	}
 	return nil
 }
 
 func (r *deviceRepository) ExistsBySerialNumber(ctx context.Context, serialNumber string) (bool, error) {
-	query := `SELECT EXISTS(SELECT 1 FROM devices WHERE serial_number = $1 AND deleted_at IS NULL)`
-	var exists bool
-	err := r.db.QueryRow(ctx, query, serialNumber).Scan(&exists)
-	return exists, err
+	exists, err := r.db.ExistsDeviceBySerialNumber(ctx, serialNumber)
+	return bool(exists), err
 }

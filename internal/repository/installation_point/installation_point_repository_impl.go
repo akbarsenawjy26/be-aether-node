@@ -2,24 +2,26 @@ package installation_point
 
 import (
 	"context"
-	domainIP "aether-node/internal/domain/installation_point"
-
 	"errors"
 	"time"
+
+	"aether-node/internal/db"
+	domainIP "aether-node/internal/domain/installation_point"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 var ErrInstallationPointNotFound = errors.New("installation point not found")
 
 type installationPointRepository struct {
-	db *pgxpool.Pool
+	db *db.Queries
 }
 
-func NewInstallationPointRepository(db *pgxpool.Pool) domainIP.InstallationPointRepository {
-	return &installationPointRepository{db: db}
+func NewInstallationPointRepository(pool *pgxpool.Pool) domainIP.InstallationPointRepository {
+	return &installationPointRepository{db: db.New(pool)}
 }
 
 func (r *installationPointRepository) Create(ctx context.Context, ip *domainIP.InstallationPoint) error {
@@ -27,52 +29,42 @@ func (r *installationPointRepository) Create(ctx context.Context, ip *domainIP.I
 		ip.GUID = uuid.New().String()
 	}
 
-	query := `
-		INSERT INTO installation_points (guid, name, device_guid, location_guid, notes, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`
-
+	guid, _ := uuid.Parse(ip.GUID)
+	deviceGUID, _ := uuid.Parse(ip.DeviceGUID)
+	locationGUID, _ := uuid.Parse(ip.LocationGUID)
 	now := time.Now()
-	_, err := r.db.Exec(ctx, query,
-		ip.GUID,
-		ip.Name,
-		ip.DeviceGUID,
-		ip.LocationGUID,
-		ip.Notes,
-		now,
-		now,
-	)
 
-	return err
+	params := db.CreateInstallationPointParams{
+		Guid:         db.NewUUID(guid),
+		Name:         ip.Name,
+		DeviceGuid:   db.NewUUID(deviceGUID),
+		LocationGuid: db.NewUUID(locationGUID),
+		CreatedAt:    db.NewTimestamptz(now),
+		UpdatedAt:    db.NewTimestamptz(now),
+	}
+
+	if ip.Notes != "" {
+		params.Notes = db.NewText(ip.Notes)
+	}
+
+	return r.db.CreateInstallationPoint(ctx, params)
 }
 
 func (r *installationPointRepository) GetByGUID(ctx context.Context, guid string) (*domainIP.InstallationPoint, error) {
-	query := `
-		SELECT guid, name, device_guid, location_guid, notes, created_at, updated_at, deleted_at
-		FROM installation_points
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
-
-	ip := &domainIP.InstallationPoint{}
-	err := r.db.QueryRow(ctx, query, guid).Scan(
-		&ip.GUID,
-		&ip.Name,
-		&ip.DeviceGUID,
-		&ip.LocationGUID,
-		&ip.Notes,
-		&ip.CreatedAt,
-		&ip.UpdatedAt,
-		&ip.DeletedAt,
-	)
-
-	if errors.Is(err, pgx.ErrNoRows) {
+	id, err := uuid.Parse(guid)
+	if err != nil {
 		return nil, ErrInstallationPointNotFound
 	}
+
+	dbIP, err := r.db.GetInstallationPointByGUID(ctx, db.NewUUID(id))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInstallationPointNotFound
+		}
 		return nil, err
 	}
 
-	return ip, nil
+	return db.InstallationPointFromDB(&dbIP), nil
 }
 
 func (r *installationPointRepository) List(ctx context.Context, params domainIP.ListParams) (*domainIP.ListResult, error) {
@@ -82,83 +74,45 @@ func (r *installationPointRepository) List(ctx context.Context, params domainIP.
 	if params.Page <= 0 {
 		params.Page = 1
 	}
-	if params.Order == "" {
-		params.Order = "created_at"
+
+	var search string
+	if params.Search != "" {
+		search = "%" + params.Search + "%"
 	}
-	if params.Sort == "" {
-		params.Sort = "DESC"
+
+	var deviceGUID pgtype.UUID
+	if params.DeviceGUID != "" {
+		id, _ := uuid.Parse(params.DeviceGUID)
+		deviceGUID = db.NewUUID(id)
+	}
+
+	var locationGUID pgtype.UUID
+	if params.LocationGUID != "" {
+		id, _ := uuid.Parse(params.LocationGUID)
+		locationGUID = db.NewUUID(id)
 	}
 
 	offset := (params.Page - 1) * params.Limit
 
-	// Build query with filters
-	whereClause := "WHERE ip.deleted_at IS NULL"
-	args := []interface{}{}
-	argIdx := 1
-
-	if params.Search != "" {
-		whereClause += ` AND (ip.name ILIKE $` + string(rune('0'+argIdx)) + ` OR ip.notes ILIKE $` + string(rune('0'+argIdx)) + `)`
-		args = append(args, "%"+params.Search+"%")
-		argIdx++
-	}
-
-	if params.DeviceGUID != "" {
-		whereClause += ` AND ip.device_guid = $` + string(rune('0'+argIdx))
-		args = append(args, params.DeviceGUID)
-		argIdx++
-	}
-
-	if params.LocationGUID != "" {
-		whereClause += ` AND ip.location_guid = $` + string(rune('0'+argIdx))
-		args = append(args, params.LocationGUID)
-		argIdx++
-	}
-
-	// Count total
-	countQuery := `
-		SELECT COUNT(*) 
-		FROM installation_points ip
-		` + whereClause
-
-	var total int64
-	err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total)
+	dbIPs, err := r.db.ListInstallationPoints(ctx, db.ListInstallationPointsParams{
+		Column1: search,
+		Column2: deviceGUID,
+		Column3: locationGUID,
+		Limit:   int32(params.Limit),
+		Offset:  int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Get data
-	query := `
-		SELECT ip.guid, ip.name, ip.device_guid, ip.location_guid, ip.notes, ip.created_at, ip.updated_at, ip.deleted_at
-		FROM installation_points ip
-		` + whereClause + `
-		ORDER BY ip.` + params.Order + ` ` + params.Sort + `
-		LIMIT $` + string(rune('0'+argIdx)) + ` OFFSET $` + string(rune('0'+argIdx+1))
-
-	args = append(args, params.Limit, offset)
-
-	rows, err := r.db.Query(ctx, query, args...)
+	total, err := r.db.CountInstallationPoints(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	ips := make([]*domainIP.InstallationPoint, 0)
-	for rows.Next() {
-		ip := &domainIP.InstallationPoint{}
-		err := rows.Scan(
-			&ip.GUID,
-			&ip.Name,
-			&ip.DeviceGUID,
-			&ip.LocationGUID,
-			&ip.Notes,
-			&ip.CreatedAt,
-			&ip.UpdatedAt,
-			&ip.DeletedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		ips = append(ips, ip)
+	ips := make([]*domainIP.InstallationPoint, 0, len(dbIPs))
+	for i := range dbIPs {
+		ips = append(ips, db.InstallationPointFromDB(&dbIPs[i]))
 	}
 
 	totalPages := int(total) / params.Limit
@@ -176,91 +130,107 @@ func (r *installationPointRepository) List(ctx context.Context, params domainIP.
 }
 
 func (r *installationPointRepository) Update(ctx context.Context, ip *domainIP.InstallationPoint) error {
-	query := `
-		UPDATE installation_points
-		SET name = $2, device_guid = $3, location_guid = $4, notes = $5, updated_at = $6
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
+	guid, _ := uuid.Parse(ip.GUID)
+	deviceGUID, _ := uuid.Parse(ip.DeviceGUID)
+	locationGUID, _ := uuid.Parse(ip.LocationGUID)
+	now := time.Now()
 
-	ip.UpdatedAt = time.Now()
-	result, err := r.db.Exec(ctx, query,
-		ip.GUID,
-		ip.Name,
-		ip.DeviceGUID,
-		ip.LocationGUID,
-		ip.Notes,
-		ip.UpdatedAt,
-	)
+	params := db.UpdateInstallationPointParams{
+		Guid:         db.NewUUID(guid),
+		Name:         ip.Name,
+		DeviceGuid:   db.NewUUID(deviceGUID),
+		LocationGuid: db.NewUUID(locationGUID),
+		UpdatedAt:    db.NewTimestamptz(now),
+	}
 
+	if ip.Notes != "" {
+		params.Notes = db.NewText(ip.Notes)
+	}
+
+	err := r.db.UpdateInstallationPoint(ctx, params)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInstallationPointNotFound
+		}
 		return err
 	}
-
-	if result.RowsAffected() == 0 {
-		return ErrInstallationPointNotFound
-	}
-
 	return nil
 }
 
 func (r *installationPointRepository) Delete(ctx context.Context, guid string) error {
-	query := `
-		UPDATE installation_points
-		SET deleted_at = $2, updated_at = $2
-		WHERE guid = $1 AND deleted_at IS NULL
-	`
-
-	now := time.Now()
-	result, err := r.db.Exec(ctx, query, guid, now)
+	id, err := uuid.Parse(guid)
 	if err != nil {
-		return err
-	}
-
-	if result.RowsAffected() == 0 {
 		return ErrInstallationPointNotFound
 	}
 
+	err = r.db.DeleteInstallationPoint(ctx, db.DeleteInstallationPointParams{
+		Guid:      db.NewUUID(id),
+		DeletedAt: db.NewTimestamptz(time.Now()),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInstallationPointNotFound
+		}
+		return err
+	}
 	return nil
 }
 
 func (r *installationPointRepository) GetByGUIDWithRelations(ctx context.Context, guid string) (*domainIP.InstallationPointWithRelations, error) {
-	query := `
-		SELECT 
-			ip.guid, ip.name, ip.device_guid, ip.location_guid, ip.notes, ip.created_at, ip.updated_at, ip.deleted_at,
-			d.serial_number, d.alias, l.name
-		FROM installation_points ip
-		LEFT JOIN devices d ON ip.device_guid = d.guid
-		LEFT JOIN locations l ON ip.location_guid = l.guid
-		WHERE ip.guid = $1 AND ip.deleted_at IS NULL
-	`
-
-	ip := &domainIP.InstallationPointWithRelations{}
-	err := r.db.QueryRow(ctx, query, guid).Scan(
-		&ip.GUID,
-		&ip.Name,
-		&ip.DeviceGUID,
-		&ip.LocationGUID,
-		&ip.Notes,
-		&ip.CreatedAt,
-		&ip.UpdatedAt,
-		&ip.DeletedAt,
-		&ip.DeviceSerialNumber,
-		&ip.DeviceAlias,
-		&ip.LocationName,
-	)
-
-	if errors.Is(err, pgx.ErrNoRows) {
+	id, err := uuid.Parse(guid)
+	if err != nil {
 		return nil, ErrInstallationPointNotFound
 	}
+
+	row, err := r.db.GetInstallationPointWithRelations(ctx, db.NewUUID(id))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInstallationPointNotFound
+		}
 		return nil, err
 	}
 
-	return ip, nil
+	ip := &domainIP.InstallationPoint{
+		Name: row.Name,
+	}
+	if row.Guid.Valid {
+		ip.GUID = uuid.UUID(row.Guid.Bytes).String()
+	}
+	if row.DeviceGuid.Valid {
+		ip.DeviceGUID = uuid.UUID(row.DeviceGuid.Bytes).String()
+	}
+	if row.LocationGuid.Valid {
+		ip.LocationGUID = uuid.UUID(row.LocationGuid.Bytes).String()
+	}
+	if row.Notes.Valid {
+		ip.Notes = row.Notes.String
+	}
+	if row.CreatedAt.Valid {
+		ip.CreatedAt = row.CreatedAt.Time
+	}
+	if row.UpdatedAt.Valid {
+		ip.UpdatedAt = row.UpdatedAt.Time
+	}
+	if row.DeletedAt.Valid {
+		ip.DeletedAt = &row.DeletedAt.Time
+	}
+
+	result := &domainIP.InstallationPointWithRelations{
+		InstallationPoint: *ip,
+	}
+	if row.SerialNumber.Valid {
+		result.DeviceSerialNumber = row.SerialNumber.String
+	}
+	if row.Alias.Valid {
+		result.DeviceAlias = row.Alias.String
+	}
+	if row.Name_2.Valid {
+		result.LocationName = row.Name_2.String
+	}
+
+	return result, nil
 }
 
 func (r *installationPointRepository) ListWithRelations(ctx context.Context, params domainIP.ListParams) (*domainIP.ListResult, error) {
-	// For simplicity, we reuse the List method and enhance in service layer
-	// In production, you might want a dedicated query with JOINs
 	return r.List(ctx, params)
 }

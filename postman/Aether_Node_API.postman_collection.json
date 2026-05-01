@@ -75,9 +75,9 @@
                   "pm.test('Status 200', function() {",
                   "    pm.response.to.have.status(200);",
                   "});",
-                  "pm.test('Response is ok', function() {",
+                  "pm.test('Response has status', function() {",
                   "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData.status).to.eql('ok');",
+                  "    pm.expect(jsonData).to.have.property('status');",
                   "});"
                 ]
               }
@@ -91,7 +91,59 @@
               "host": ["{{baseUrl}}"],
               "path": ["health"]
             },
-            "description": "Health check endpoint - no auth required"
+            "description": "Full health check with component statuses - no auth required"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /health/live",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "live"]
+            },
+            "description": "Liveness probe - no auth required"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /health/ready",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 503', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 503]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "ready"]
+            },
+            "description": "Readiness probe - checks PostgreSQL and InfluxDB - no auth required"
           },
           "response": []
         }
@@ -112,8 +164,8 @@
                   "});",
                   "if (pm.response.code === 201) {",
                   "    var jsonData = pm.response.json();",
-                  "    if (jsonData.data && jsonData.data.user) {",
-                  "        pm.collectionVariables.set('userGuid', jsonData.data.user.guid);",
+                  "    if (jsonData.data && jsonData.data.guid) {",
+                  "        pm.collectionVariables.set('userGuid', jsonData.data.guid);",
                   "    }",
                   "    if (jsonData.data && jsonData.data.access_token) {",
                   "        pm.collectionVariables.set('accessToken', jsonData.data.access_token);",
@@ -174,7 +226,7 @@
                   "    pm.collectionVariables.set('refreshToken', jsonData.data.refresh_token);",
                   "    console.log('Refresh token saved');",
                   "}",
-                  "if (jsonData.data && jsonData.data.user) {",
+                  "if (jsonData.data && jsonData.data.user && jsonData.data.user.guid) {",
                   "    pm.collectionVariables.set('userGuid', jsonData.data.user.guid);",
                   "}"
                 ]
@@ -455,7 +507,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10,\n    \"order\": \"desc\",\n    \"sort\": \"created_at\",\n    \"search\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -583,7 +635,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"name\": \"Kantor Pusat Jakarta\",\n    \"address\": \"Jl. Sudirman No. 1, Jakarta\",\n    \"latitude\": -6.2088,\n    \"longitude\": 106.8456\n}",
+              "raw": "{\n    \"name\": \"Kantor Pusat Jakarta\",\n    \"notes\": \"Lokasi utama perusahaan\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -658,7 +710,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10,\n    \"order\": \"desc\",\n    \"sort\": \"created_at\",\n    \"search\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -702,7 +754,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"name\": \"Kantor Pusat Jakarta - Updated\"\n}",
+              "raw": "{\n    \"name\": \"Kantor Pusat Jakarta - Updated\",\n    \"notes\": \"Lokasi telah diperbarui\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -789,7 +841,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"serial_number\": \"{{deviceSerialNumber}}\",\n    \"device_type\": \"sensor_env\",\n    \"location_guid\": \"{{locationGuid}}\"\n}",
+              "raw": "{\n    \"serial_number\": \"{{deviceSerialNumber}}\",\n    \"type\": \"sensor_env\",\n    \"alias\": \"Sensor Ruang Server\",\n    \"notes\": \"Sensor untuk monitoring lingkungan\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -801,7 +853,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["device"]
             },
-            "description": "Create new device. Note: serial_number must be unique. If locationGuid is empty, omit the field."
+            "description": "Create new device. Note: serial_number must be unique."
           },
           "response": []
         },
@@ -864,7 +916,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10,\n    \"order\": \"desc\",\n    \"sort\": \"created_at\",\n    \"search\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -908,7 +960,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"device_type\": \"sensor_env_v2\"\n}",
+              "raw": "{\n    \"type\": \"sensor_env_v2\",\n    \"alias\": \"Sensor Ruang Server v2\",\n    \"notes\": \"Sensor telah ditingkatkan\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -992,7 +1044,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"name\": \"Sensor Ruang Server A\",\n    \"device_guid\": \"{{deviceGuid}}\",\n    \"location_guid\": \"{{locationGuid}}\"\n}",
+              "raw": "{\n    \"name\": \"Sensor Ruang Server A\",\n    \"device_guid\": \"{{deviceGuid}}\",\n    \"location_guid\": \"{{locationGuid}}\",\n    \"notes\": \"Installed on rack server room\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1004,7 +1056,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["installation-point"]
             },
-            "description": "Create installation point. Note: If deviceGuid/locationGuid are empty, omit the field."
+            "description": "Create installation point"
           },
           "response": []
         },
@@ -1098,7 +1150,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10,\n    \"order\": \"desc\",\n    \"sort\": \"created_at\",\n    \"search\": \"\",\n    \"device_guid\": \"\",\n    \"location_guid\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1110,7 +1162,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["installation-point", "list"]
             },
-            "description": "List installation points with pagination"
+            "description": "List installation points with pagination and filters"
           },
           "response": []
         },
@@ -1142,7 +1194,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"name\": \"Sensor Ruang Server A - Updated\"\n}",
+              "raw": "{\n    \"name\": \"Sensor Ruang Server A - Updated\",\n    \"notes\": \"Lokasi telah dipindahkan\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1229,7 +1281,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"name\": \"IoT Gateway Key\",\n    \"expires_at\": \"2026-12-31T23:59:59Z\"\n}",
+              "raw": "{\n    \"expire_date\": \"2026-12-31T23:59:59Z\",\n    \"notes\": \"IoT Gateway Key\",\n    \"is_active\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1304,7 +1356,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10,\n    \"order\": \"desc\",\n    \"sort\": \"created_at\",\n    \"search\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1348,7 +1400,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"name\": \"IoT Gateway Key - Updated\"\n}",
+              "raw": "{\n    \"expire_date\": \"2027-12-31T23:59:59Z\",\n    \"notes\": \"IoT Gateway Key - Extended\",\n    \"is_active\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"

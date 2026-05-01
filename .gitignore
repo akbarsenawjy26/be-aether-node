@@ -34,6 +34,9 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Hermes Agent
+.hermes/
+
 # Build
 dist/
 build/
@@ -45,3 +48,6 @@ logs/
 # Database dumps
 *.sql.dump
 *.pg_dump
+
+# Hermes Agent
+.hermes/

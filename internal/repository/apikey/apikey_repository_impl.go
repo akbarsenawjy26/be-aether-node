@@ -2,6 +2,8 @@ package apikey
 
 import (
 	"context"
+	domainAPIKey "aether-node/internal/domain/apikey"
+
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -19,11 +21,11 @@ type apiKeyRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewAPIKeyRepository(db *pgxpool.Pool) APIKeyRepository {
+func NewAPIKeyRepository(db *pgxpool.Pool) domainAPIKey.APIKeyRepository {
 	return &apiKeyRepository{db: db}
 }
 
-func (r *apiKeyRepository) Create(ctx context.Context, apiKey *APIKey) error {
+func (r *apiKeyRepository) Create(ctx context.Context, apiKey *domainAPIKey.APIKey) error {
 	if apiKey.GUID == "" {
 		apiKey.GUID = uuid.New().String()
 	}
@@ -47,14 +49,14 @@ func (r *apiKeyRepository) Create(ctx context.Context, apiKey *APIKey) error {
 	return err
 }
 
-func (r *apiKeyRepository) GetByGUID(ctx context.Context, guid string) (*APIKey, error) {
+func (r *apiKeyRepository) GetByGUID(ctx context.Context, guid string) (*domainAPIKey.APIKey, error) {
 	query := `
 		SELECT guid, key_hash, notes, expire_date, is_active, created_at, updated_at, deleted_at
 		FROM api_keys
 		WHERE guid = $1 AND deleted_at IS NULL
 	`
 
-	apiKey := &APIKey{}
+	apiKey := &domainAPIKey.APIKey{}
 	err := r.db.QueryRow(ctx, query, guid).Scan(
 		&apiKey.GUID,
 		&apiKey.KeyHash,
@@ -76,14 +78,14 @@ func (r *apiKeyRepository) GetByGUID(ctx context.Context, guid string) (*APIKey,
 	return apiKey, nil
 }
 
-func (r *apiKeyRepository) GetByKeyHash(ctx context.Context, keyHash string) (*APIKey, error) {
+func (r *apiKeyRepository) GetByKeyHash(ctx context.Context, keyHash string) (*domainAPIKey.APIKey, error) {
 	query := `
 		SELECT guid, key_hash, notes, expire_date, is_active, created_at, updated_at, deleted_at
 		FROM api_keys
 		WHERE key_hash = $1 AND deleted_at IS NULL
 	`
 
-	apiKey := &APIKey{}
+	apiKey := &domainAPIKey.APIKey{}
 	err := r.db.QueryRow(ctx, query, keyHash).Scan(
 		&apiKey.GUID,
 		&apiKey.KeyHash,
@@ -105,7 +107,7 @@ func (r *apiKeyRepository) GetByKeyHash(ctx context.Context, keyHash string) (*A
 	return apiKey, nil
 }
 
-func (r *apiKeyRepository) List(ctx context.Context, params ListParams) (*ListResult, error) {
+func (r *apiKeyRepository) List(ctx context.Context, params domainAPIKey.ListParams) (*domainAPIKey.ListResult, error) {
 	if params.Limit <= 0 {
 		params.Limit = 10
 	}
@@ -160,9 +162,9 @@ func (r *apiKeyRepository) List(ctx context.Context, params ListParams) (*ListRe
 	}
 	defer rows.Close()
 
-	apiKeys := make([]*APIKey, 0)
+	apiKeys := make([]*domainAPIKey.APIKey, 0)
 	for rows.Next() {
-		ak := &APIKey{}
+		ak := &domainAPIKey.APIKey{}
 		err := rows.Scan(
 			&ak.GUID,
 			&ak.KeyHash,
@@ -184,7 +186,7 @@ func (r *apiKeyRepository) List(ctx context.Context, params ListParams) (*ListRe
 		totalPages++
 	}
 
-	return &ListResult{
+	return &domainAPIKey.ListResult{
 		APIKeys:   apiKeys,
 		Total:     total,
 		Page:      params.Page,
@@ -193,7 +195,7 @@ func (r *apiKeyRepository) List(ctx context.Context, params ListParams) (*ListRe
 	}, nil
 }
 
-func (r *apiKeyRepository) Update(ctx context.Context, apiKey *APIKey) error {
+func (r *apiKeyRepository) Update(ctx context.Context, apiKey *domainAPIKey.APIKey) error {
 	query := `
 		UPDATE api_keys
 		SET notes = $2, expire_date = $3, is_active = $4, updated_at = $5
@@ -240,7 +242,7 @@ func (r *apiKeyRepository) Delete(ctx context.Context, guid string) error {
 	return nil
 }
 
-func (r *apiKeyRepository) ValidateKey(ctx context.Context, key string) (*APIKey, error) {
+func (r *apiKeyRepository) ValidateKey(ctx context.Context, key string) (*domainAPIKey.APIKey, error) {
 	// Hash the provided key
 	keyHash := sha256.Sum256([]byte(key))
 	keyHashStr := hex.EncodeToString(keyHash[:])

@@ -2,6 +2,8 @@ package device
 
 import (
 	"context"
+	domainDevice "aether-node/internal/domain/device"
+
 	"errors"
 	"time"
 
@@ -16,11 +18,11 @@ type deviceRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewDeviceRepository(db *pgxpool.Pool) DeviceRepository {
+func NewDeviceRepository(db *pgxpool.Pool) domainDevice.DeviceRepository {
 	return &deviceRepository{db: db}
 }
 
-func (r *deviceRepository) Create(ctx context.Context, device *Device) error {
+func (r *deviceRepository) Create(ctx context.Context, device *domainDevice.Device) error {
 	if device.GUID == "" {
 		device.GUID = uuid.New().String()
 	}
@@ -45,14 +47,14 @@ func (r *deviceRepository) Create(ctx context.Context, device *Device) error {
 	return err
 }
 
-func (r *deviceRepository) GetByGUID(ctx context.Context, guid string) (*Device, error) {
+func (r *deviceRepository) GetByGUID(ctx context.Context, guid string) (*domainDevice.Device, error) {
 	query := `
 		SELECT guid, type, serial_number, alias, notes, is_active, created_at, updated_at, deleted_at
 		FROM devices
 		WHERE guid = $1 AND deleted_at IS NULL
 	`
 
-	device := &Device{}
+	device := &domainDevice.Device{}
 	err := r.db.QueryRow(ctx, query, guid).Scan(
 		&device.GUID,
 		&device.Type,
@@ -75,14 +77,14 @@ func (r *deviceRepository) GetByGUID(ctx context.Context, guid string) (*Device,
 	return device, nil
 }
 
-func (r *deviceRepository) GetBySerialNumber(ctx context.Context, serialNumber string) (*Device, error) {
+func (r *deviceRepository) GetBySerialNumber(ctx context.Context, serialNumber string) (*domainDevice.Device, error) {
 	query := `
 		SELECT guid, type, serial_number, alias, notes, is_active, created_at, updated_at, deleted_at
 		FROM devices
 		WHERE serial_number = $1 AND deleted_at IS NULL
 	`
 
-	device := &Device{}
+	device := &domainDevice.Device{}
 	err := r.db.QueryRow(ctx, query, serialNumber).Scan(
 		&device.GUID,
 		&device.Type,
@@ -105,7 +107,7 @@ func (r *deviceRepository) GetBySerialNumber(ctx context.Context, serialNumber s
 	return device, nil
 }
 
-func (r *deviceRepository) List(ctx context.Context, params ListParams) (*ListResult, error) {
+func (r *deviceRepository) List(ctx context.Context, params domainDevice.ListParams) (*domainDevice.ListResult, error) {
 	if params.Limit <= 0 {
 		params.Limit = 10
 	}
@@ -160,9 +162,9 @@ func (r *deviceRepository) List(ctx context.Context, params ListParams) (*ListRe
 	}
 	defer rows.Close()
 
-	devices := make([]*Device, 0)
+	devices := make([]*domainDevice.Device, 0)
 	for rows.Next() {
-		d := &Device{}
+		d := &domainDevice.Device{}
 		err := rows.Scan(
 			&d.GUID,
 			&d.Type,
@@ -185,7 +187,7 @@ func (r *deviceRepository) List(ctx context.Context, params ListParams) (*ListRe
 		totalPages++
 	}
 
-	return &ListResult{
+	return &domainDevice.ListResult{
 		Devices:   devices,
 		Total:     total,
 		Page:      params.Page,
@@ -194,7 +196,7 @@ func (r *deviceRepository) List(ctx context.Context, params ListParams) (*ListRe
 	}, nil
 }
 
-func (r *deviceRepository) Update(ctx context.Context, device *Device) error {
+func (r *deviceRepository) Update(ctx context.Context, device *domainDevice.Device) error {
 	query := `
 		UPDATE devices
 		SET type = $2, serial_number = $3, alias = $4, notes = $5, is_active = $6, updated_at = $7

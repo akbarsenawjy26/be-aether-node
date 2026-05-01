@@ -1,0 +1,1552 @@
+{
+  "info": {
+    "name": "Aether Node API",
+    "description": "Aether Node - IoT Telemetry & Device Management API. Environment: Docker Compose (PostgreSQL + InfluxDB + n8n).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userGuid",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "deviceGuid",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "locationGuid",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "installationPointGuid",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "apiKeyGuid",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "deviceSerialNumber",
+      "value": "TEST-SN-001",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "⚙️ Health Check",
+      "item": [
+        {
+          "name": "GET /health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Response is ok', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Health check endpoint - no auth required"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🔐 Auth (Public)",
+      "item": [
+        {
+          "name": "POST /auth/register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201 or 409', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.user) {",
+                  "        pm.collectionVariables.set('userGuid', jsonData.data.user.guid);",
+                  "    }",
+                  "    if (jsonData.data && jsonData.data.access_token) {",
+                  "        pm.collectionVariables.set('accessToken', jsonData.data.access_token);",
+                  "    }",
+                  "    if (jsonData.data && jsonData.data.refresh_token) {",
+                  "        pm.collectionVariables.set('refreshToken', jsonData.data.refresh_token);",
+                  "    }",
+                  "    console.log('Registration successful');",
+                  "} else {",
+                  "    console.log('User already exists - this is ok for re-runs');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"admin@aether.local\",\n    \"password\": \"admin123\",\n    \"first_name\": \"Admin\",\n    \"last_name\": \"Aether\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Register new user account"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /auth/login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data && jsonData.data.access_token) {",
+                  "    pm.collectionVariables.set('accessToken', jsonData.data.access_token);",
+                  "    console.log('Access token saved');",
+                  "}",
+                  "if (jsonData.data && jsonData.data.refresh_token) {",
+                  "    pm.collectionVariables.set('refreshToken', jsonData.data.refresh_token);",
+                  "    console.log('Refresh token saved');",
+                  "}",
+                  "if (jsonData.data && jsonData.data.user) {",
+                  "    pm.collectionVariables.set('userGuid', jsonData.data.user.guid);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"admin@aether.local\",\n    \"password\": \"admin123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Login and get JWT tokens"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /auth/token/refresh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data && jsonData.data.access_token) {",
+                  "    pm.collectionVariables.set('accessToken', jsonData.data.access_token);",
+                  "}",
+                  "if (jsonData.data && jsonData.data.refresh_token) {",
+                  "    pm.collectionVariables.set('refreshToken', jsonData.data.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"refresh_token\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/token/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "token", "refresh"]
+            },
+            "description": "Refresh access token using refresh token"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /auth/forgot-password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"admin@aether.local\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "forgot-password"]
+            },
+            "description": "Request password reset email"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /auth/logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.collectionVariables.set('accessToken', '');",
+                  "pm.collectionVariables.set('refreshToken', '');",
+                  "console.log('Tokens cleared');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"refresh_token\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Logout and invalidate refresh token"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "👤 Users (Protected)",
+      "item": [
+        {
+          "name": "POST /user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201 or 409', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.guid) {",
+                  "        pm.collectionVariables.set('userGuid', jsonData.data.guid);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"febra@aether.local\",\n    \"password\": \"password123\",\n    \"first_name\": \"Febra\",\n    \"last_name\": \"Dev\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/user",
+              "host": ["{{baseUrl}}"],
+              "path": ["user"]
+            },
+            "description": "Create new user"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /user/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/user/{{userGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["user", "{{userGuid}}"]
+            },
+            "description": "Get user by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /user/list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Has pagination', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/user/list",
+              "host": ["{{baseUrl}}"],
+              "path": ["user", "list"]
+            },
+            "description": "List users with pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /user/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"first_name\": \"FebraUpdated\",\n    \"last_name\": \"DevUpdated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/user/{{userGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["user", "{{userGuid}}"]
+            },
+            "description": "Update user by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /user/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/user/{{userGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["user", "{{userGuid}}"]
+            },
+            "description": "Delete user by GUID"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "📍 Locations (Protected)",
+      "item": [
+        {
+          "name": "POST /location",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data && jsonData.data.guid) {",
+                  "    pm.collectionVariables.set('locationGuid', jsonData.data.guid);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Kantor Pusat Jakarta\",\n    \"address\": \"Jl. Sudirman No. 1, Jakarta\",\n    \"latitude\": -6.2088,\n    \"longitude\": 106.8456\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/location",
+              "host": ["{{baseUrl}}"],
+              "path": ["location"]
+            },
+            "description": "Create new location"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /location/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/location/{{locationGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["location", "{{locationGuid}}"]
+            },
+            "description": "Get location by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /location/list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/location/list",
+              "host": ["{{baseUrl}}"],
+              "path": ["location", "list"]
+            },
+            "description": "List locations with pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /location/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Kantor Pusat Jakarta - Updated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/location/{{locationGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["location", "{{locationGuid}}"]
+            },
+            "description": "Update location by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /location/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/location/{{locationGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["location", "{{locationGuid}}"]
+            },
+            "description": "Delete location by GUID"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "📱 Devices (Protected)",
+      "item": [
+        {
+          "name": "POST /device",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data && jsonData.data.guid) {",
+                  "    pm.collectionVariables.set('deviceGuid', jsonData.data.guid);",
+                  "}",
+                  "if (jsonData.data && jsonData.data.serial_number) {",
+                  "    pm.collectionVariables.set('deviceSerialNumber', jsonData.data.serial_number);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"serial_number\": \"{{deviceSerialNumber}}\",\n    \"device_type\": \"sensor_env\",\n    \"location_guid\": \"{{locationGuid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/device",
+              "host": ["{{baseUrl}}"],
+              "path": ["device"]
+            },
+            "description": "Create new device. Note: serial_number must be unique. If locationGuid is empty, omit the field."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /device/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device/{{deviceGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["device", "{{deviceGuid}}"]
+            },
+            "description": "Get device by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /device/list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/device/list",
+              "host": ["{{baseUrl}}"],
+              "path": ["device", "list"]
+            },
+            "description": "List devices with pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /device/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"device_type\": \"sensor_env_v2\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/device/{{deviceGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["device", "{{deviceGuid}}"]
+            },
+            "description": "Update device by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /device/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device/{{deviceGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["device", "{{deviceGuid}}"]
+            },
+            "description": "Delete device by GUID"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "📦 Installation Points (Protected)",
+      "item": [
+        {
+          "name": "POST /installation-point",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data && jsonData.data.guid) {",
+                  "    pm.collectionVariables.set('installationPointGuid', jsonData.data.guid);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Sensor Ruang Server A\",\n    \"device_guid\": \"{{deviceGuid}}\",\n    \"location_guid\": \"{{locationGuid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/installation-point",
+              "host": ["{{baseUrl}}"],
+              "path": ["installation-point"]
+            },
+            "description": "Create installation point. Note: If deviceGuid/locationGuid are empty, omit the field."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /installation-point/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/installation-point/{{installationPointGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["installation-point", "{{installationPointGuid}}"]
+            },
+            "description": "Get installation point by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /installation-point/:guid/relations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/installation-point/{{installationPointGuid}}/relations",
+              "host": ["{{baseUrl}}"],
+              "path": ["installation-point", "{{installationPointGuid}}", "relations"]
+            },
+            "description": "Get installation point with device and location relations"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /installation-point/list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/installation-point/list",
+              "host": ["{{baseUrl}}"],
+              "path": ["installation-point", "list"]
+            },
+            "description": "List installation points with pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /installation-point/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Sensor Ruang Server A - Updated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/installation-point/{{installationPointGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["installation-point", "{{installationPointGuid}}"]
+            },
+            "description": "Update installation point by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /installation-point/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/installation-point/{{installationPointGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["installation-point", "{{installationPointGuid}}"]
+            },
+            "description": "Delete installation point by GUID"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🔑 API Keys (Protected)",
+      "item": [
+        {
+          "name": "POST /apikey",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data && jsonData.data.guid) {",
+                  "    pm.collectionVariables.set('apiKeyGuid', jsonData.data.guid);",
+                  "}",
+                  "if (jsonData.data && jsonData.data.key) {",
+                  "    console.log('API Key created:', jsonData.data.key);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"IoT Gateway Key\",\n    \"expires_at\": \"2026-12-31T23:59:59Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/apikey",
+              "host": ["{{baseUrl}}"],
+              "path": ["apikey"]
+            },
+            "description": "Create new API key"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /apikey/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/apikey/{{apiKeyGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["apikey", "{{apiKeyGuid}}"]
+            },
+            "description": "Get API key by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /apikey/list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"page\": 1,\n    \"limit\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/apikey/list",
+              "host": ["{{baseUrl}}"],
+              "path": ["apikey", "list"]
+            },
+            "description": "List API keys with pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /apikey/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"IoT Gateway Key - Updated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/apikey/{{apiKeyGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["apikey", "{{apiKeyGuid}}"]
+            },
+            "description": "Update API key by GUID"
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /apikey/:guid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 404', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/apikey/{{apiKeyGuid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["apikey", "{{apiKeyGuid}}"]
+            },
+            "description": "Delete API key by GUID"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "📊 Telemetry",
+      "item": [
+        {
+          "name": "GET /stream (SSE - All Devices)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Content-Type is event-stream', function() {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/event-stream');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/stream",
+              "host": ["{{baseUrl}}"],
+              "path": ["stream"]
+            },
+            "description": "Server-Sent Events stream for ALL devices. Opens persistent connection. Use with 'Send' mode = 'Manual' in Postman."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /stream/:device-sn (SSE - Single Device)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Content-Type is event-stream', function() {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/event-stream');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/stream/{{deviceSerialNumber}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["stream", "{{deviceSerialNumber}}"]
+            },
+            "description": "Server-Sent Events stream for specific device by serial number. Opens persistent connection."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /telemetry (Device Ingestion)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201 or 200', function() {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"device_sn\": \"{{deviceSerialNumber}}\",\n    \"device_type\": \"sensor_env\",\n    \"location_name\": \"Kantor Jakarta\",\n    \"temperature\": 25.5,\n    \"humidity\": 60.2,\n    \"aqi\": 45,\n    \"pm25\": 12.3,\n    \"pm10\": 25.6,\n    \"co2\": 420,\n    \"voc\": 0.15\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/telemetry",
+              "host": ["{{baseUrl}}"],
+              "path": ["telemetry"]
+            },
+            "description": "Ingest telemetry data from device (no auth required - intended for IoT devices). This writes to InfluxDB."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /history/telemetry/:device-sn",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Has pagination', function() {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"start_time\": \"2026-01-01T00:00:00Z\",\n    \"end_time\": \"2026-12-31T23:59:59Z\",\n    \"page\": 1,\n    \"limit\": 100,\n    \"order\": \"desc\",\n    \"sort\": \"timestamp\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/history/telemetry/{{deviceSerialNumber}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["history", "telemetry", "{{deviceSerialNumber}}"]
+            },
+            "description": "Get historical telemetry data for a device from InfluxDB"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

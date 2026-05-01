@@ -2,8 +2,9 @@ package user
 
 import (
 	"context"
-	"database/sql"
-	"errors"
+	domainUser "aether-node/internal/domain/user"
+
+		"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,11 +21,11 @@ type userRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewUserRepository(db *pgxpool.Pool) UserRepository {
+func NewUserRepository(db *pgxpool.Pool) domainUser.UserRepository {
 	return &userRepository{db: db}
 }
 
-func (r *userRepository) Create(ctx context.Context, user *User) error {
+func (r *userRepository) Create(ctx context.Context, user *domainUser.User) error {
 	if user.GUID == "" {
 		user.GUID = uuid.New().String()
 	}
@@ -50,14 +51,14 @@ func (r *userRepository) Create(ctx context.Context, user *User) error {
 	return err
 }
 
-func (r *userRepository) GetByGUID(ctx context.Context, guid string) (*User, error) {
+func (r *userRepository) GetByGUID(ctx context.Context, guid string) (*domainUser.User, error) {
 	query := `
 		SELECT guid, email, password_hash, first_name, last_name, role_guid, is_active, created_at, updated_at, deleted_at
 		FROM users
 		WHERE guid = $1 AND deleted_at IS NULL
 	`
 
-	user := &User{}
+	user := &domainUser.User{}
 	err := r.db.QueryRow(ctx, query, guid).Scan(
 		&user.GUID,
 		&user.Email,
@@ -81,14 +82,14 @@ func (r *userRepository) GetByGUID(ctx context.Context, guid string) (*User, err
 	return user, nil
 }
 
-func (r *userRepository) GetByEmail(ctx context.Context, email string) (*User, error) {
+func (r *userRepository) GetByEmail(ctx context.Context, email string) (*domainUser.User, error) {
 	query := `
 		SELECT guid, email, password_hash, first_name, last_name, role_guid, is_active, created_at, updated_at, deleted_at
 		FROM users
 		WHERE email = $1 AND deleted_at IS NULL
 	`
 
-	user := &User{}
+	user := &domainUser.User{}
 	err := r.db.QueryRow(ctx, query, email).Scan(
 		&user.GUID,
 		&user.Email,
@@ -112,7 +113,7 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*User, e
 	return user, nil
 }
 
-func (r *userRepository) List(ctx context.Context, params ListParams) (*ListResult, error) {
+func (r *userRepository) List(ctx context.Context, params domainUser.ListParams) (*domainUser.ListResult, error) {
 	if params.Limit <= 0 {
 		params.Limit = 10
 	}
@@ -167,9 +168,9 @@ func (r *userRepository) List(ctx context.Context, params ListParams) (*ListResu
 	}
 	defer rows.Close()
 
-	users := make([]*User, 0)
+	users := make([]*domainUser.User, 0)
 	for rows.Next() {
-		user := &User{}
+		user := &domainUser.User{}
 		err := rows.Scan(
 			&user.GUID,
 			&user.Email,
@@ -193,7 +194,7 @@ func (r *userRepository) List(ctx context.Context, params ListParams) (*ListResu
 		totalPages++
 	}
 
-	return &ListResult{
+	return &domainUser.ListResult{
 		Users:     users,
 		Total:     total,
 		Page:      params.Page,
@@ -202,7 +203,7 @@ func (r *userRepository) List(ctx context.Context, params ListParams) (*ListResu
 	}, nil
 }
 
-func (r *userRepository) Update(ctx context.Context, user *User) error {
+func (r *userRepository) Update(ctx context.Context, user *domainUser.User) error {
 	query := `
 		UPDATE users
 		SET email = $2, password_hash = $3, first_name = $4, last_name = $5, role_guid = $6, is_active = $7, updated_at = $8

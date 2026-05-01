@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	domainAuth "aether-node/internal/domain/auth"
+
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -16,11 +18,11 @@ type refreshTokenRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewRefreshTokenRepository(db *pgxpool.Pool) RefreshTokenRepository {
+func NewRefreshTokenRepository(db *pgxpool.Pool) domainAuth.RefreshTokenRepository {
 	return &refreshTokenRepository{db: db}
 }
 
-func (r *refreshTokenRepository) Create(ctx context.Context, token *RefreshToken) error {
+func (r *refreshTokenRepository) Create(ctx context.Context, token *domainAuth.RefreshToken) error {
 	if token.GUID == "" {
 		token.GUID = uuid.New().String()
 	}
@@ -42,14 +44,14 @@ func (r *refreshTokenRepository) Create(ctx context.Context, token *RefreshToken
 	return err
 }
 
-func (r *refreshTokenRepository) GetByTokenHash(ctx context.Context, tokenHash string) (*RefreshToken, error) {
+func (r *refreshTokenRepository) GetByTokenHash(ctx context.Context, tokenHash string) (*domainAuth.RefreshToken, error) {
 	query := `
 		SELECT guid, user_guid, token_hash, expires_at, created_at
 		FROM refresh_tokens
 		WHERE token_hash = $1
 	`
 
-	token := &RefreshToken{}
+	token := &domainAuth.RefreshToken{}
 	err := r.db.QueryRow(ctx, query, tokenHash).Scan(
 		&token.GUID,
 		&token.UserGUID,
@@ -91,7 +93,7 @@ func (r *refreshTokenRepository) DeleteExpired(ctx context.Context) error {
 	return err
 }
 
-func (r *refreshTokenRepository) UpdateLastUsed(ctx context.Context, guid string, usedAt time.Time) error {
+func (r *refreshTokenRepository) UpdateLastUsed(ctx context.Context, guid string, usedAt string) error {
 	// No-op for now - can be used to track token usage
 	return nil
 }

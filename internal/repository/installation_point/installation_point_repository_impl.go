@@ -2,6 +2,8 @@ package installation_point
 
 import (
 	"context"
+	domainIP "aether-node/internal/domain/installation_point"
+
 	"errors"
 	"time"
 
@@ -16,11 +18,11 @@ type installationPointRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewInstallationPointRepository(db *pgxpool.Pool) InstallationPointRepository {
+func NewInstallationPointRepository(db *pgxpool.Pool) domainIP.InstallationPointRepository {
 	return &installationPointRepository{db: db}
 }
 
-func (r *installationPointRepository) Create(ctx context.Context, ip *InstallationPoint) error {
+func (r *installationPointRepository) Create(ctx context.Context, ip *domainIP.InstallationPoint) error {
 	if ip.GUID == "" {
 		ip.GUID = uuid.New().String()
 	}
@@ -44,14 +46,14 @@ func (r *installationPointRepository) Create(ctx context.Context, ip *Installati
 	return err
 }
 
-func (r *installationPointRepository) GetByGUID(ctx context.Context, guid string) (*InstallationPoint, error) {
+func (r *installationPointRepository) GetByGUID(ctx context.Context, guid string) (*domainIP.InstallationPoint, error) {
 	query := `
 		SELECT guid, name, device_guid, location_guid, notes, created_at, updated_at, deleted_at
 		FROM installation_points
 		WHERE guid = $1 AND deleted_at IS NULL
 	`
 
-	ip := &InstallationPoint{}
+	ip := &domainIP.InstallationPoint{}
 	err := r.db.QueryRow(ctx, query, guid).Scan(
 		&ip.GUID,
 		&ip.Name,
@@ -73,7 +75,7 @@ func (r *installationPointRepository) GetByGUID(ctx context.Context, guid string
 	return ip, nil
 }
 
-func (r *installationPointRepository) List(ctx context.Context, params ListParams) (*ListResult, error) {
+func (r *installationPointRepository) List(ctx context.Context, params domainIP.ListParams) (*domainIP.ListResult, error) {
 	if params.Limit <= 0 {
 		params.Limit = 10
 	}
@@ -140,9 +142,9 @@ func (r *installationPointRepository) List(ctx context.Context, params ListParam
 	}
 	defer rows.Close()
 
-	ips := make([]*InstallationPoint, 0)
+	ips := make([]*domainIP.InstallationPoint, 0)
 	for rows.Next() {
-		ip := &InstallationPoint{}
+		ip := &domainIP.InstallationPoint{}
 		err := rows.Scan(
 			&ip.GUID,
 			&ip.Name,
@@ -164,7 +166,7 @@ func (r *installationPointRepository) List(ctx context.Context, params ListParam
 		totalPages++
 	}
 
-	return &ListResult{
+	return &domainIP.ListResult{
 		InstallationPoints: ips,
 		Total:             total,
 		Page:              params.Page,
@@ -173,7 +175,7 @@ func (r *installationPointRepository) List(ctx context.Context, params ListParam
 	}, nil
 }
 
-func (r *installationPointRepository) Update(ctx context.Context, ip *InstallationPoint) error {
+func (r *installationPointRepository) Update(ctx context.Context, ip *domainIP.InstallationPoint) error {
 	query := `
 		UPDATE installation_points
 		SET name = $2, device_guid = $3, location_guid = $4, notes = $5, updated_at = $6
@@ -221,7 +223,7 @@ func (r *installationPointRepository) Delete(ctx context.Context, guid string) e
 	return nil
 }
 
-func (r *installationPointRepository) GetByGUIDWithRelations(ctx context.Context, guid string) (*InstallationPointWithRelations, error) {
+func (r *installationPointRepository) GetByGUIDWithRelations(ctx context.Context, guid string) (*domainIP.InstallationPointWithRelations, error) {
 	query := `
 		SELECT 
 			ip.guid, ip.name, ip.device_guid, ip.location_guid, ip.notes, ip.created_at, ip.updated_at, ip.deleted_at,
@@ -232,7 +234,7 @@ func (r *installationPointRepository) GetByGUIDWithRelations(ctx context.Context
 		WHERE ip.guid = $1 AND ip.deleted_at IS NULL
 	`
 
-	ip := &InstallationPointWithRelations{}
+	ip := &domainIP.InstallationPointWithRelations{}
 	err := r.db.QueryRow(ctx, query, guid).Scan(
 		&ip.GUID,
 		&ip.Name,
@@ -257,7 +259,7 @@ func (r *installationPointRepository) GetByGUIDWithRelations(ctx context.Context
 	return ip, nil
 }
 
-func (r *installationPointRepository) ListWithRelations(ctx context.Context, params ListParams) (*ListResult, error) {
+func (r *installationPointRepository) ListWithRelations(ctx context.Context, params domainIP.ListParams) (*domainIP.ListResult, error) {
 	// For simplicity, we reuse the List method and enhance in service layer
 	// In production, you might want a dedicated query with JOINs
 	return r.List(ctx, params)

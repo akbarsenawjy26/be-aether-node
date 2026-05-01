@@ -1,17 +1,21 @@
 package installation_point
 
-import "context"
+import (
+	"context"
+
+	domainIP "aether-node/internal/domain/installation_point"
+)
 
 type installationPointService struct {
-	repo InstallationPointRepository
+	repo domainIP.InstallationPointRepository
 }
 
-func NewInstallationPointService(repo InstallationPointRepository) InstallationPointService {
+func NewInstallationPointService(repo domainIP.InstallationPointRepository) domainIP.InstallationPointService {
 	return &installationPointService{repo: repo}
 }
 
-func (s *installationPointService) CreateInstallationPoint(ctx context.Context, req *CreateInstallationPointRequest) (*InstallationPoint, error) {
-	ip := &InstallationPoint{
+func (s *installationPointService) CreateInstallationPoint(ctx context.Context, req *domainIP.CreateInstallationPointRequest) (*domainIP.InstallationPoint, error) {
+	ip := &domainIP.InstallationPoint{
 		Name:         req.Name,
 		DeviceGUID:   req.DeviceGUID,
 		LocationGUID: req.LocationGUID,
@@ -25,19 +29,19 @@ func (s *installationPointService) CreateInstallationPoint(ctx context.Context, 
 	return ip, nil
 }
 
-func (s *installationPointService) GetInstallationPoint(ctx context.Context, guid string) (*InstallationPoint, error) {
+func (s *installationPointService) GetInstallationPoint(ctx context.Context, guid string) (*domainIP.InstallationPoint, error) {
 	return s.repo.GetByGUID(ctx, guid)
 }
 
-func (s *installationPointService) GetInstallationPointWithRelations(ctx context.Context, guid string) (*InstallationPointWithRelations, error) {
+func (s *installationPointService) GetInstallationPointWithRelations(ctx context.Context, guid string) (*domainIP.InstallationPointWithRelations, error) {
 	return s.repo.GetByGUIDWithRelations(ctx, guid)
 }
 
-func (s *installationPointService) ListInstallationPoints(ctx context.Context, params *ListParams) (*ListResult, error) {
+func (s *installationPointService) ListInstallationPoints(ctx context.Context, params *domainIP.ListParams) (*domainIP.ListResult, error) {
 	return s.repo.List(ctx, *params)
 }
 
-func (s *installationPointService) UpdateInstallationPoint(ctx context.Context, guid string, req *UpdateInstallationPointRequest) (*InstallationPoint, error) {
+func (s *installationPointService) UpdateInstallationPoint(ctx context.Context, guid string, req *domainIP.UpdateInstallationPointRequest) (*domainIP.InstallationPoint, error) {
 	ip, err := s.repo.GetByGUID(ctx, guid)
 	if err != nil {
 		return nil, err

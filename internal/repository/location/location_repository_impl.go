@@ -2,6 +2,8 @@ package location
 
 import (
 	"context"
+	domainLocation "aether-node/internal/domain/location"
+
 	"errors"
 	"time"
 
@@ -16,11 +18,11 @@ type locationRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewLocationRepository(db *pgxpool.Pool) LocationRepository {
+func NewLocationRepository(db *pgxpool.Pool) domainLocation.LocationRepository {
 	return &locationRepository{db: db}
 }
 
-func (r *locationRepository) Create(ctx context.Context, location *Location) error {
+func (r *locationRepository) Create(ctx context.Context, location *domainLocation.Location) error {
 	if location.GUID == "" {
 		location.GUID = uuid.New().String()
 	}
@@ -42,14 +44,14 @@ func (r *locationRepository) Create(ctx context.Context, location *Location) err
 	return err
 }
 
-func (r *locationRepository) GetByGUID(ctx context.Context, guid string) (*Location, error) {
+func (r *locationRepository) GetByGUID(ctx context.Context, guid string) (*domainLocation.Location, error) {
 	query := `
 		SELECT guid, name, notes, created_at, updated_at, deleted_at
 		FROM locations
 		WHERE guid = $1 AND deleted_at IS NULL
 	`
 
-	location := &Location{}
+	location := &domainLocation.Location{}
 	err := r.db.QueryRow(ctx, query, guid).Scan(
 		&location.GUID,
 		&location.Name,
@@ -69,7 +71,7 @@ func (r *locationRepository) GetByGUID(ctx context.Context, guid string) (*Locat
 	return location, nil
 }
 
-func (r *locationRepository) List(ctx context.Context, params ListParams) (*ListResult, error) {
+func (r *locationRepository) List(ctx context.Context, params domainLocation.ListParams) (*domainLocation.ListResult, error) {
 	if params.Limit <= 0 {
 		params.Limit = 10
 	}
@@ -124,9 +126,9 @@ func (r *locationRepository) List(ctx context.Context, params ListParams) (*List
 	}
 	defer rows.Close()
 
-	locations := make([]*Location, 0)
+	locations := make([]*domainLocation.Location, 0)
 	for rows.Next() {
-		loc := &Location{}
+		loc := &domainLocation.Location{}
 		err := rows.Scan(
 			&loc.GUID,
 			&loc.Name,
@@ -146,7 +148,7 @@ func (r *locationRepository) List(ctx context.Context, params ListParams) (*List
 		totalPages++
 	}
 
-	return &ListResult{
+	return &domainLocation.ListResult{
 		Locations: locations,
 		Total:     total,
 		Page:      params.Page,
@@ -155,7 +157,7 @@ func (r *locationRepository) List(ctx context.Context, params ListParams) (*List
 	}, nil
 }
 
-func (r *locationRepository) Update(ctx context.Context, location *Location) error {
+func (r *locationRepository) Update(ctx context.Context, location *domainLocation.Location) error {
 	query := `
 		UPDATE locations
 		SET name = $2, notes = $3, updated_at = $4

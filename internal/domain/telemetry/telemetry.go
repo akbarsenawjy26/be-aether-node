@@ -1,6 +1,9 @@
 package telemetry
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type Telemetry struct {
 	DeviceSN         string    `json:"device_sn"`
@@ -31,4 +34,18 @@ type TelemetryListResult struct {
 	Page      int
 	Limit     int
 	TotalPage int
+}
+
+type TelemetryRepository interface {
+	WriteTelemetry(ctx context.Context, telemetry *Telemetry) error
+	GetLatestByDeviceSN(ctx context.Context, deviceSN string) (*Telemetry, error)
+	GetAllLatest(ctx context.Context) ([]*Telemetry, error)
+	QueryHistory(ctx context.Context, deviceSN string, query *TelemetryQuery) (*TelemetryListResult, error)
+}
+
+type TelemetryService interface {
+	WriteTelemetry(ctx context.Context, telemetry *Telemetry) error
+	StreamAllDevices(ctx context.Context) (<-chan *Telemetry, <-chan error)
+	StreamDevice(ctx context.Context, deviceSN string) (<-chan *Telemetry, <-chan error)
+	GetHistory(ctx context.Context, deviceSN string, query *TelemetryQuery) (*TelemetryListResult, error)
 }

@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -25,51 +25,41 @@ func NewTelemetryHandler(svc telemetry.TelemetryService) *TelemetryHandler {
 func (h *TelemetryHandler) StreamAllDevices(c echo.Context) error {
 	ctx := c.Request().Context()
 
-	// Set SSE headers
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().Header().Set("Access-Control-Allow-Origin", "*")
+	c.Response().WriteHeader(http.StatusOK)
 
-	// Create context with cancel for cleanup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Get telemetry stream
 	telemetryChan, errChan := h.svc.StreamAllDevices(ctx)
-
-	// Send keep-alive every 30 seconds
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	c.Stream(func(w io.Writer) bool {
+	for {
 		select {
 		case <-ctx.Done():
-			return false
-
+			return nil
 		case err := <-errChan:
 			if err != nil {
 				c.Logger().Error("SSE error: ", err)
 			}
-			return false
-
+			return nil
 		case t := <-telemetryChan:
 			data, _ := json.Marshal(t)
-			c.Render(http.StatusOK, "text/event-stream", map[string]interface{}{
-				"event": "telemetry",
-				"data":  string(data),
-			})
-			c.Response().Flush()
-			return true
-
+			fmt.Fprintf(c.Response(), "event: telemetry\ndata: %s\n\n", string(data))
+			if flusher, ok := c.Response().Writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
 		case <-ticker.C:
-			// Send keep-alive comment
-			c.Logger().Print("SSE keep-alive")
-			return true
+			fmt.Fprintf(c.Response(), ": keep-alive\n\n")
+			if flusher, ok := c.Response().Writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
 		}
-	})
-
-	return nil
+	}
 }
 
 // StreamDevice handles GET /stream/:device-sn - SSE for specific device
@@ -81,51 +71,41 @@ func (h *TelemetryHandler) StreamDevice(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "Device serial number is required")
 	}
 
-	// Set SSE headers
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().Header().Set("Access-Control-Allow-Origin", "*")
+	c.Response().WriteHeader(http.StatusOK)
 
-	// Create context with cancel for cleanup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Get telemetry stream for specific device
 	telemetryChan, errChan := h.svc.StreamDevice(ctx, deviceSN)
-
-	// Send keep-alive every 30 seconds
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	c.Stream(func(w io.Writer) bool {
+	for {
 		select {
 		case <-ctx.Done():
-			return false
-
+			return nil
 		case err := <-errChan:
 			if err != nil {
 				c.Logger().Error("SSE error: ", err)
 			}
-			return false
-
+			return nil
 		case t := <-telemetryChan:
 			data, _ := json.Marshal(t)
-			c.Render(http.StatusOK, "text/event-stream", map[string]interface{}{
-				"event": "telemetry",
-				"data":  string(data),
-			})
-			c.Response().Flush()
-			return true
-
+			fmt.Fprintf(c.Response(), "event: telemetry\ndata: %s\n\n", string(data))
+			if flusher, ok := c.Response().Writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
 		case <-ticker.C:
-			// Send keep-alive comment
-			c.Logger().Print("SSE keep-alive")
-			return true
+			fmt.Fprintf(c.Response(), ": keep-alive\n\n")
+			if flusher, ok := c.Response().Writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
 		}
-	})
-
-	return nil
+	}
 }
 
 // GetHistory handles POST /history/telemetry/:device-sn

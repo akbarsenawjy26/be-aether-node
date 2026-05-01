@@ -2,41 +2,34 @@ package user
 
 import (
 	"context"
-	"errors"
 
+	domainUser "aether-node/internal/domain/user"
 	"golang.org/x/crypto/bcrypt"
 )
 
-var (
-	ErrInvalidPassword = errors.New("invalid password")
-	ErrEmailExists     = errors.New("email already exists")
-)
-
 type userService struct {
-	repo UserRepository
+	repo domainUser.UserRepository
 }
 
-func NewUserService(repo UserRepository) UserService {
+func NewUserService(repo domainUser.UserRepository) domainUser.UserService {
 	return &userService{repo: repo}
 }
 
-func (s *userService) CreateUser(ctx context.Context, req *CreateUserRequest) (*User, error) {
-	// Check if email already exists
+func (s *userService) CreateUser(ctx context.Context, req *domainUser.CreateUserRequest) (*domainUser.User, error) {
 	exists, err := s.repo.ExistsByEmail(ctx, req.Email)
 	if err != nil {
 		return nil, err
 	}
 	if exists {
-		return nil, ErrEmailExists
+		return nil, domainUser.ErrEmailAlreadyExists
 	}
 
-	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 
-	user := &User{
+	user := &domainUser.User{
 		Email:        req.Email,
 		PasswordHash: string(hashedPassword),
 		FirstName:    req.FirstName,
@@ -52,29 +45,27 @@ func (s *userService) CreateUser(ctx context.Context, req *CreateUserRequest) (*
 	return user, nil
 }
 
-func (s *userService) GetUser(ctx context.Context, guid string) (*User, error) {
+func (s *userService) GetUser(ctx context.Context, guid string) (*domainUser.User, error) {
 	return s.repo.GetByGUID(ctx, guid)
 }
 
-func (s *userService) ListUsers(ctx context.Context, params *ListParams) (*ListResult, error) {
+func (s *userService) ListUsers(ctx context.Context, params *domainUser.ListParams) (*domainUser.ListResult, error) {
 	return s.repo.List(ctx, *params)
 }
 
-func (s *userService) UpdateUser(ctx context.Context, guid string, req *UpdateUserRequest) (*User, error) {
+func (s *userService) UpdateUser(ctx context.Context, guid string, req *domainUser.UpdateUserRequest) (*domainUser.User, error) {
 	user, err := s.repo.GetByGUID(ctx, guid)
 	if err != nil {
 		return nil, err
 	}
 
-	// Update fields if provided
 	if req.Email != nil {
-		// Check if new email already exists
 		exists, err := s.repo.ExistsByEmail(ctx, *req.Email)
 		if err != nil {
 			return nil, err
 		}
 		if exists && *req.Email != user.Email {
-			return nil, ErrEmailExists
+			return nil, domainUser.ErrEmailAlreadyExists
 		}
 		user.Email = *req.Email
 	}

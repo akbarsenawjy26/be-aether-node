@@ -2,32 +2,28 @@ package device
 
 import (
 	"context"
-	"errors"
-)
 
-var (
-	ErrDeviceSerialNumberExists = errors.New("serial number already exists")
+	domainDevice "aether-node/internal/domain/device"
 )
 
 type deviceService struct {
-	repo DeviceRepository
+	repo domainDevice.DeviceRepository
 }
 
-func NewDeviceService(repo DeviceRepository) DeviceService {
+func NewDeviceService(repo domainDevice.DeviceRepository) domainDevice.DeviceService {
 	return &deviceService{repo: repo}
 }
 
-func (s *deviceService) CreateDevice(ctx context.Context, req *CreateDeviceRequest) (*Device, error) {
-	// Check if serial number already exists
+func (s *deviceService) CreateDevice(ctx context.Context, req *domainDevice.CreateDeviceRequest) (*domainDevice.Device, error) {
 	exists, err := s.repo.ExistsBySerialNumber(ctx, req.SerialNumber)
 	if err != nil {
 		return nil, err
 	}
 	if exists {
-		return nil, ErrDeviceSerialNumberExists
+		return nil, domainDevice.ErrDeviceSerialNumberExists
 	}
 
-	device := &Device{
+	device := &domainDevice.Device{
 		Type:         req.Type,
 		SerialNumber: req.SerialNumber,
 		Alias:        req.Alias,
@@ -42,32 +38,31 @@ func (s *deviceService) CreateDevice(ctx context.Context, req *CreateDeviceReque
 	return device, nil
 }
 
-func (s *deviceService) GetDevice(ctx context.Context, guid string) (*Device, error) {
+func (s *deviceService) GetDevice(ctx context.Context, guid string) (*domainDevice.Device, error) {
 	return s.repo.GetByGUID(ctx, guid)
 }
 
-func (s *deviceService) GetDeviceBySerialNumber(ctx context.Context, serialNumber string) (*Device, error) {
+func (s *deviceService) GetDeviceBySerialNumber(ctx context.Context, serialNumber string) (*domainDevice.Device, error) {
 	return s.repo.GetBySerialNumber(ctx, serialNumber)
 }
 
-func (s *deviceService) ListDevices(ctx context.Context, params *ListParams) (*ListResult, error) {
+func (s *deviceService) ListDevices(ctx context.Context, params *domainDevice.ListParams) (*domainDevice.ListResult, error) {
 	return s.repo.List(ctx, *params)
 }
 
-func (s *deviceService) UpdateDevice(ctx context.Context, guid string, req *UpdateDeviceRequest) (*Device, error) {
+func (s *deviceService) UpdateDevice(ctx context.Context, guid string, req *domainDevice.UpdateDeviceRequest) (*domainDevice.Device, error) {
 	device, err := s.repo.GetByGUID(ctx, guid)
 	if err != nil {
 		return nil, err
 	}
 
-	// Check if new serial number already exists
 	if req.SerialNumber != nil && *req.SerialNumber != device.SerialNumber {
 		exists, err := s.repo.ExistsBySerialNumber(ctx, *req.SerialNumber)
 		if err != nil {
 			return nil, err
 		}
 		if exists {
-			return nil, ErrDeviceSerialNumberExists
+			return nil, domainDevice.ErrDeviceSerialNumberExists
 		}
 		device.SerialNumber = *req.SerialNumber
 	}

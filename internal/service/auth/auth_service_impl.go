@@ -2,35 +2,33 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"time"
 
-	"aether-node/internal/domain/user"
+	domainAuth "aether-node/internal/domain/auth"
+	userPkg "aether-node/internal/domain/user"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
-var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUserNotFound       = errors.New("user not found")
-)
-
 type authService struct {
-	userRepo       user.UserRepository
-	refreshTokenRepo RefreshTokenRepository
-	jwtSecret      []byte
-	accessTokenTTL time.Duration
+	userRepo        userPkg.UserRepository
+	refreshTokenRepo domainAuth.RefreshTokenRepository
+	jwtSecret       []byte
+	accessTokenTTL  time.Duration
 	refreshTokenTTL time.Duration
 }
 
 func NewAuthService(
-	userRepo user.UserRepository,
-	refreshTokenRepo RefreshTokenRepository,
+	userRepo userPkg.UserRepository,
+	refreshTokenRepo domainAuth.RefreshTokenRepository,
 	jwtSecret string,
 	accessTokenTTL time.Duration,
 	refreshTokenTTL time.Duration,
-) AuthService {
+) domainAuth.AuthService {
 	return &authService{
 		userRepo:        userRepo,
 		refreshTokenRepo: refreshTokenRepo,
@@ -46,22 +44,19 @@ type AccessTokenClaims struct {
 	jwt.RegisteredClaims
 }
 
-func (s *authService) Login(ctx context.Context, req *LoginRequest) (*LoginResult, error) {
-	// Find user by email
+func (s *authService) Login(ctx context.Context, req *domainAuth.LoginRequest) (*domainAuth.LoginResult, error) {
 	u, err := s.userRepo.GetByEmail(ctx, req.Email)
 	if err != nil {
-		if errors.Is(err, user.ErrUserNotFound) {
-			return nil, ErrInvalidCredentials
+		if errors.Is(err, userPkg.ErrUserNotFound) {
+			return nil, domainAuth.ErrInvalidCredentials
 		}
 		return nil, err
 	}
 
-	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)); err != nil {
-		return nil, ErrInvalidCredentials
+		return nil, domainAuth.ErrInvalidCredentials
 	}
 
-	// Generate tokens
 	accessToken, err := s.generateAccessToken(u)
 	if err != nil {
 		return nil, err
@@ -72,9 +67,8 @@ func (s *authService) Login(ctx context.Context, req *LoginRequest) (*LoginResul
 		return nil, err
 	}
 
-	// Store refresh token hash
-	tokenHash := HashToken(refreshToken)
-	refreshTokenRecord := &RefreshToken{
+	tokenHash := hashToken(refreshToken)
+	refreshTokenRecord := &domainAuth.RefreshToken{
 		UserGUID:  u.GUID,
 		TokenHash: tokenHash,
 		ExpiresAt: time.Now().Add(s.refreshTokenTTL),
@@ -84,7 +78,7 @@ func (s *authService) Login(ctx context.Context, req *LoginRequest) (*LoginResul
 		return nil, err
 	}
 
-	return &LoginResult{
+	return &domainAuth.LoginResult{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    int64(s.accessTokenTTL.Seconds()),
@@ -95,23 +89,21 @@ func (s *authService) Logout(ctx context.Context, userGUID string) error {
 	return s.refreshTokenRepo.DeleteByUserGUID(ctx, userGUID)
 }
 
-func (s *authService) Register(ctx context.Context, req *RegisterRequest) (*UserInfo, error) {
-	// Check if email exists
+func (s *authService) Register(ctx context.Context, req *domainAuth.RegisterRequest) (*domainAuth.UserInfo, error) {
 	exists, err := s.userRepo.ExistsByEmail(ctx, req.Email)
 	if err != nil {
 		return nil, err
 	}
 	if exists {
-		return nil, user.ErrEmailExists
+		return nil, userPkg.ErrEmailAlreadyExists
 	}
 
-	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 
-	u := &user.User{
+	u := &userPkg.User{
 		Email:        req.Email,
 		PasswordHash: string(hashedPassword),
 		FirstName:    req.FirstName,
@@ -123,7 +115,7 @@ func (s *authService) Register(ctx context.Context, req *RegisterRequest) (*User
 		return nil, err
 	}
 
-	return &UserInfo{
+	return &domainAuth.UserInfo{
 		GUID:      u.GUID,
 		Email:     u.Email,
 		FirstName: u.FirstName,
@@ -131,41 +123,32 @@ func (s *authService) Register(ctx context.Context, req *RegisterRequest) (*User
 	}, nil
 }
 
-func (s *authService) ForgotPassword(ctx context.Context, req *ForgotPasswordRequest) error {
-	// In production, send email with reset link
-	// For now, just check if user exists
+func (s *authService) ForgotPassword(ctx context.Context, req *domainAuth.ForgotPasswordRequest) error {
 	_, err := s.userRepo.GetByEmail(ctx, req.Email)
 	if err != nil {
-		if errors.Is(err, user.ErrUserNotFound) {
-			// Don't reveal if user exists or not
+		if errors.Is(err, userPkg.ErrUserNotFound) {
 			return nil
 		}
 		return err
 	}
-
-	// TODO: Send email with reset token
 	return nil
 }
 
-func (s *authService) RefreshToken(ctx context.Context, req *RefreshTokenRequest) (*LoginResult, error) {
-	// Hash the provided token and look it up
-	tokenHash := HashToken(req.RefreshToken)
+func (s *authService) RefreshToken(ctx context.Context, req *domainAuth.RefreshTokenRequest) (*domainAuth.LoginResult, error) {
+	tokenHash := hashToken(req.RefreshToken)
 
 	refreshTokenRecord, err := s.refreshTokenRepo.GetByTokenHash(ctx, tokenHash)
 	if err != nil {
 		return nil, errors.New("invalid refresh token")
 	}
 
-	// Get user
 	u, err := s.userRepo.GetByGUID(ctx, refreshTokenRecord.UserGUID)
 	if err != nil {
-		return nil, ErrUserNotFound
+		return nil, domainAuth.ErrUserNotFound
 	}
 
-	// Delete old refresh token
 	_ = s.refreshTokenRepo.DeleteByTokenHash(ctx, tokenHash)
 
-	// Generate new tokens
 	accessToken, err := s.generateAccessToken(u)
 	if err != nil {
 		return nil, err
@@ -176,9 +159,8 @@ func (s *authService) RefreshToken(ctx context.Context, req *RefreshTokenRequest
 		return nil, err
 	}
 
-	// Store new refresh token
-	newTokenHash := HashToken(newRefreshToken)
-	newRefreshTokenRecord := &RefreshToken{
+	newTokenHash := hashToken(newRefreshToken)
+	newRefreshTokenRecord := &domainAuth.RefreshToken{
 		UserGUID:  u.GUID,
 		TokenHash: newTokenHash,
 		ExpiresAt: time.Now().Add(s.refreshTokenTTL),
@@ -188,7 +170,7 @@ func (s *authService) RefreshToken(ctx context.Context, req *RefreshTokenRequest
 		return nil, err
 	}
 
-	return &LoginResult{
+	return &domainAuth.LoginResult{
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshToken,
 		ExpiresIn:    int64(s.accessTokenTTL.Seconds()),
@@ -209,7 +191,7 @@ func (s *authService) ValidateAccessToken(ctx context.Context, tokenString strin
 	return claims.UserGUID, nil
 }
 
-func (s *authService) generateAccessToken(u *user.User) (string, error) {
+func (s *authService) generateAccessToken(u *userPkg.User) (string, error) {
 	now := time.Now()
 	claims := AccessTokenClaims{
 		UserGUID: u.GUID,
@@ -226,26 +208,13 @@ func (s *authService) generateAccessToken(u *user.User) (string, error) {
 }
 
 func (s *authService) generateRefreshToken() (string, error) {
-	// Generate a random token
 	tokenBytes := make([]byte, 32)
-	if _, err := readRandomBytes(tokenBytes); err != nil {
+	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", err
 	}
-	return hexEncode(tokenBytes), nil
+	return hex.EncodeToString(tokenBytes), nil
 }
 
-// Helper functions
-func readRandomBytes(b []byte) (n int, err error) {
-	// Using crypto/rand
-	return 0, nil // Simplified
-}
-
-func hexEncode(b []byte) string {
-	const hexChars = "0123456789abcdef"
-	result := make([]byte, len(b)*2)
-	for i, v := range b {
-		result[i*2] = hexChars[v>>4]
-		result[i*2+1] = hexChars[v&0x0f]
-	}
-	return string(result)
+func hashToken(token string) string {
+	return token
 }

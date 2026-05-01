@@ -1,17 +1,21 @@
 package location
 
-import "context"
+import (
+	"context"
+
+	domainLocation "aether-node/internal/domain/location"
+)
 
 type locationService struct {
-	repo LocationRepository
+	repo domainLocation.LocationRepository
 }
 
-func NewLocationService(repo LocationRepository) LocationService {
+func NewLocationService(repo domainLocation.LocationRepository) domainLocation.LocationService {
 	return &locationService{repo: repo}
 }
 
-func (s *locationService) CreateLocation(ctx context.Context, req *CreateLocationRequest) (*Location, error) {
-	location := &Location{
+func (s *locationService) CreateLocation(ctx context.Context, req *domainLocation.CreateLocationRequest) (*domainLocation.Location, error) {
+	location := &domainLocation.Location{
 		Name:  req.Name,
 		Notes: req.Notes,
 	}
@@ -23,15 +27,15 @@ func (s *locationService) CreateLocation(ctx context.Context, req *CreateLocatio
 	return location, nil
 }
 
-func (s *locationService) GetLocation(ctx context.Context, guid string) (*Location, error) {
+func (s *locationService) GetLocation(ctx context.Context, guid string) (*domainLocation.Location, error) {
 	return s.repo.GetByGUID(ctx, guid)
 }
 
-func (s *locationService) ListLocations(ctx context.Context, params *ListParams) (*ListResult, error) {
+func (s *locationService) ListLocations(ctx context.Context, params *domainLocation.ListParams) (*domainLocation.ListResult, error) {
 	return s.repo.List(ctx, *params)
 }
 
-func (s *locationService) UpdateLocation(ctx context.Context, guid string, req *UpdateLocationRequest) (*Location, error) {
+func (s *locationService) UpdateLocation(ctx context.Context, guid string, req *domainLocation.UpdateLocationRequest) (*domainLocation.Location, error) {
 	location, err := s.repo.GetByGUID(ctx, guid)
 	if err != nil {
 		return nil, err

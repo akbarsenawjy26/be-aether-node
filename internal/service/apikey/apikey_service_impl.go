@@ -5,38 +5,37 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"time"
+
+	domainAPIKey "aether-node/internal/domain/apikey"
 )
 
 type apiKeyService struct {
-	repo     APIKeyRepository
+	repo      domainAPIKey.APIKeyRepository
 	keyPrefix string
 }
 
-func NewAPIKeyService(repo APIKeyRepository, keyPrefix string) APIKeyService {
+func NewAPIKeyService(repo domainAPIKey.APIKeyRepository, keyPrefix string) domainAPIKey.APIKeyService {
 	if keyPrefix == "" {
 		keyPrefix = "aeth_live_pk_"
 	}
 	return &apiKeyService{repo: repo, keyPrefix: keyPrefix}
 }
 
-func (s *apiKeyService) CreateAPIKey(ctx context.Context, req *CreateAPIKeyRequest) (*APIKeyWithKey, error) {
-	// Generate a random key
+func (s *apiKeyService) CreateAPIKey(ctx context.Context, req *domainAPIKey.CreateAPIKeyRequest) (*domainAPIKey.APIKeyWithKey, error) {
 	randomBytes := make([]byte, 32)
 	if _, err := rand.Read(randomBytes); err != nil {
 		return nil, err
 	}
 	plainKey := s.keyPrefix + hex.EncodeToString(randomBytes)
 
-	// Hash the key for storage
 	keyHash := hashKey(plainKey)
 
-	// Parse expire date
 	expireDate, err := time.Parse(time.RFC3339, req.ExpireDate)
 	if err != nil {
 		return nil, err
 	}
 
-	apiKey := &APIKey{
+	apiKey := &domainAPIKey.APIKey{
 		KeyHash:    keyHash,
 		Notes:      req.Notes,
 		ExpireDate: expireDate,
@@ -47,22 +46,21 @@ func (s *apiKeyService) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReque
 		return nil, err
 	}
 
-	// Return with the plain key (only available on creation)
-	return &APIKeyWithKey{
+	return &domainAPIKey.APIKeyWithKey{
 		APIKey: *apiKey,
 		Key:    plainKey,
 	}, nil
 }
 
-func (s *apiKeyService) GetAPIKey(ctx context.Context, guid string) (*APIKey, error) {
+func (s *apiKeyService) GetAPIKey(ctx context.Context, guid string) (*domainAPIKey.APIKey, error) {
 	return s.repo.GetByGUID(ctx, guid)
 }
 
-func (s *apiKeyService) ListAPIKeys(ctx context.Context, params *ListParams) (*ListResult, error) {
+func (s *apiKeyService) ListAPIKeys(ctx context.Context, params *domainAPIKey.ListParams) (*domainAPIKey.ListResult, error) {
 	return s.repo.List(ctx, *params)
 }
 
-func (s *apiKeyService) UpdateAPIKey(ctx context.Context, guid string, req *UpdateAPIKeyRequest) (*APIKey, error) {
+func (s *apiKeyService) UpdateAPIKey(ctx context.Context, guid string, req *domainAPIKey.UpdateAPIKeyRequest) (*domainAPIKey.APIKey, error) {
 	apiKey, err := s.repo.GetByGUID(ctx, guid)
 	if err != nil {
 		return nil, err
@@ -95,12 +93,10 @@ func (s *apiKeyService) DeleteAPIKey(ctx context.Context, guid string) error {
 	return s.repo.Delete(ctx, guid)
 }
 
-func (s *apiKeyService) ValidateAPIKey(ctx context.Context, key string) (*APIKey, error) {
+func (s *apiKeyService) ValidateAPIKey(ctx context.Context, key string) (*domainAPIKey.APIKey, error) {
 	return s.repo.ValidateKey(ctx, key)
 }
 
 func hashKey(key string) string {
-	// Simple hash for storage - in production use crypto/sha256
-	// This is already done in repository with proper hashing
 	return key
 }

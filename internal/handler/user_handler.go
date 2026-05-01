@@ -41,7 +41,7 @@ func (h *UserHandler) CreateUser(c echo.Context) error {
 
 	u, err := h.svc.CreateUser(ctx, createReq)
 	if err != nil {
-		if err == user.ErrEmailExists {
+		if err == user.ErrEmailAlreadyExists {
 			return response.Error(c, http.StatusConflict, "DUPLICATE_ENTRY", "Email already exists")
 		}
 		return response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
@@ -131,7 +131,7 @@ func (h *UserHandler) UpdateUser(c echo.Context) error {
 		if err == user.ErrUserNotFound {
 			return response.Error(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "User not found")
 		}
-		if err == user.ErrEmailExists {
+		if err == user.ErrEmailAlreadyExists {
 			return response.Error(c, http.StatusConflict, "DUPLICATE_ENTRY", "Email already exists")
 		}
 		return response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())

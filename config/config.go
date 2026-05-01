@@ -1,6 +1,11 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"log"
+
+	"github.com/joho/godotenv"
+)
 
 // Config holds the entire application configuration.
 // All config MUST be loaded via Load() before use.
@@ -14,6 +19,11 @@ type Config struct {
 // Load reads all configuration from environment variables.
 // Call this once at application startup before any other config access.
 func Load() (*Config, error) {
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, relying on system environment variables")
+	}
+
 	cfg := &Config{}
 
 	cfg.Database.Load()

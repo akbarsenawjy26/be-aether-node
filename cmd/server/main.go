@@ -116,6 +116,9 @@ func main() {
 	e := echo.New()
 	e.HideBanner = true
 
+	// Custom JWT error handler for granular error codes
+	e.HTTPErrorHandler = middleware.JWTAuthErrorHandler()
+
 	// Middleware
 	e.Use(middleware.RequestLogger())
 	e.Use(echomiddleware.Recover())
@@ -147,6 +150,7 @@ func main() {
 	api := e.Group("")
 	api.Use(echomiddleware.JWTWithConfig(echomiddleware.JWTConfig{
 		SigningKey: []byte(cfg.JWT.Secret),
+		ErrorHandlerWithContext: middleware.JWTAuthErrorHandlerWithContext,
 	}))
 
 	// User routes

@@ -83,6 +83,12 @@ func (h *TelemetryHandler) sendAllDevices(c echo.Context, project string) error 
 	if err != nil {
 		return err
 	}
+
+	// Record SSE events sent (grouped by type)
+	for deviceType := range payload {
+		metrics.RecordSSEEvent(deviceType)
+	}
+
 	return writeSSEData(c, payload)
 }
 

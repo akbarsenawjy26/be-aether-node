@@ -123,3 +123,87 @@ func (s *telemetryService) StreamDevice(ctx context.Context, deviceSN string) (<
 func (s *telemetryService) GetHistory(ctx context.Context, deviceSN string, query *domainTelemetry.TelemetryQuery) (*domainTelemetry.TelemetryListResult, error) {
 	return s.repo.QueryHistory(ctx, deviceSN, query)
 }
+
+// ============================================================
+// NEW: StreamAllDevicesWithHealth — merge health + telemetry, group by type
+// Pattern dari DEVICE_STREAM_GUIDE.md Section 8
+// ============================================================
+
+func (s *telemetryService) StreamAllDevicesWithHealth(ctx context.Context, project string) (domainTelemetry.DevicePayload, error) {
+	filter := domainTelemetry.DeviceFilter{Project: project}
+
+	// Query health dan telemetry secara terpisah
+	healthList, err := s.repo.GetLatestHealth(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	telemetryMap, err := s.repo.GetLatestTelemetry(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge: health + telemetry → group by device type
+	payload := make(domainTelemetry.DevicePayload)
+	for _, h := range healthList {
+		t := telemetryMap[h.DeviceSN]
+		if t == nil {
+			t = make(domainTelemetry.TelemetryData)
+		}
+		payload[h.Type] = append(payload[h.Type], domainTelemetry.DeviceEntry{
+			Health:    h,
+			Telemetry: t,
+		})
+	}
+
+	return payload, nil
+}
+
+// ============================================================
+// NEW: StreamDeviceWithHealth — merge health + telemetry untuk satu device
+// Pattern dari DEVICE_STREAM_GUIDE.md Section 8
+// ============================================================
+
+func (s *telemetryService) StreamDeviceWithHealth(ctx context.Context, project, deviceSN string) (*domainTelemetry.DeviceEntry, error) {
+	filter := domainTelemetry.DeviceFilter{Project: project, DeviceSN: deviceSN}
+
+	// Query health dan telemetry secara terpisah
+	healthList, err := s.repo.GetLatestHealth(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(healthList) == 0 {
+		return nil, nil // device not found
+	}
+
+	telemetryMap, err := s.repo.GetLatestTelemetry(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	t := telemetryMap[deviceSN]
+	if t == nil {
+		t = make(domainTelemetry.TelemetryData)
+	}
+
+	return &domainTelemetry.DeviceEntry{
+		Health:    healthList[0],
+		Telemetry: t,
+	}, nil
+}
+
+// ============================================================
+// NEW: GetTelemetryHistory — history dengan time range
+// Pattern dari DEVICE_STREAM_GUIDE.md Section 8
+// ============================================================
+
+func (s *telemetryService) GetTelemetryHistory(ctx context.Context, filter domainTelemetry.HistoryFilter) ([]domainTelemetry.TelemetryRecord, error) {
+	records, err := s.repo.GetTelemetryHistory(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if records == nil {
+		return []domainTelemetry.TelemetryRecord{}, nil
+	}
+	return records, nil
+}

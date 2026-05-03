@@ -175,12 +175,9 @@ func main() {
 	api.PATCH("/apikey/:guid", apiKeyHandler.UpdateAPIKey)
 	api.DELETE("/apikey/:guid", apiKeyHandler.DeleteAPIKey)
 
-	// Dashboard - SSE routes
-	api.GET("/stream", telemetryHandler.StreamAllDevices)
-	api.GET("/stream/:device-sn", telemetryHandler.StreamDevice)
-
-	// Dashboard - History routes
-	api.POST("/history/telemetry/:device-sn", telemetryHandler.GetHistory)
+	// Dashboard - SSE + History routes (via RegisterRoutes)
+	telemetryGroup := api.Group("/telemetry")
+	telemetryHandler.RegisterRoutes(telemetryGroup)
 
 	// Telemetry ingestion
 	e.POST("/telemetry", telemetryHandler.WriteTelemetry)

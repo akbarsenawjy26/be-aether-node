@@ -307,3 +307,351 @@ func escapeTag(s string) string {
 	}
 	return buf.String()
 }
+
+// ============================================================
+// NEW: GetLatestHealth — query health measurement with pivot
+// Pattern dari DEVICE_STREAM_GUIDE.md Section 5
+// ============================================================
+
+const offlineThreshold = 30 * time.Second
+
+func (r *telemetryRepository) GetLatestHealth(ctx context.Context, filter domainTelemetry.DeviceFilter) ([]domainTelemetry.HealthData, error) {
+	fluxQuery := r.buildHealthQuery(filter)
+
+	result, err := r.queryFluxGeneric(ctx, fluxQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.parseHealthResult(result)
+}
+
+func (r *telemetryRepository) buildHealthQuery(filter domainTelemetry.DeviceFilter) string {
+	projectFilter := ""
+	if filter.Project != "" {
+		projectFilter = fmt.Sprintf(`|> filter(fn: (r) => r["project"] == "%s")`, filter.Project)
+	}
+	deviceFilter := ""
+	if filter.DeviceSN != "" {
+		deviceFilter = fmt.Sprintf(`|> filter(fn: (r) => r["device_sn"] == "%s")`, filter.DeviceSN)
+	}
+
+	return fmt.Sprintf(`
+from(bucket: "%s")
+    |> range(start: -1m)
+    |> filter(fn: (r) => r["_measurement"] == "health")
+    %s
+    %s
+    |> group(columns: ["device_sn", "type", "project", "gateway_sn", "model"])
+    |> last()
+    |> pivot(
+        rowKey:      ["device_sn", "type", "project", "gateway_sn", "model"],
+        columnKey:   ["_field"],
+        valueColumn: "_value"
+    )
+    |> group()
+    |> yield(name: "health")
+`, r.influx.bucket, projectFilter, deviceFilter)
+}
+
+func (r *telemetryRepository) parseHealthResult(result influxQueryResult) ([]domainTelemetry.HealthData, error) {
+	var list []domainTelemetry.HealthData
+
+	for _, series := range result.Series {
+		if series.Name != "health" {
+			continue
+		}
+
+		for _, row := range series.Values {
+			rec := make(map[string]interface{})
+			for i, col := range series.Columns {
+				if i < len(row) {
+					rec[col] = row[i]
+				}
+			}
+
+			lastSeen := time.Now()
+			if v, ok := rec["_time"].(string); ok {
+				if t, err := time.Parse(time.RFC3339, v); err == nil {
+					lastSeen = t
+				}
+			}
+
+			status := "online"
+			if time.Since(lastSeen) > offlineThreshold {
+				status = "offline"
+			}
+
+			list = append(list, domainTelemetry.HealthData{
+				DeviceSN:    toString(rec["device_sn"]),
+				GatewaySN:   toString(rec["gateway_sn"]),
+				Project:     toString(rec["project"]),
+				Type:        toString(rec["type"]),
+				Model:       toString(rec["model"]),
+				Status:      status,
+				Uptime:      toFloat64(rec["uptime"]),
+				Temp:        toFloat64(rec["temp"]),
+				Hum:         toFloat64(rec["hum"]),
+				RSSI:        toFloat64(rec["rssi"]),
+				ResetReason: toString(rec["reset_reason"]),
+				LastSeen:    lastSeen,
+			})
+		}
+	}
+
+	return list, nil
+}
+
+// ============================================================
+// NEW: GetLatestTelemetry — query telemetry measurement with pivot
+// Pattern dari DEVICE_STREAM_GUIDE.md Section 5
+// ============================================================
+
+func (r *telemetryRepository) GetLatestTelemetry(ctx context.Context, filter domainTelemetry.DeviceFilter) (map[string]domainTelemetry.TelemetryData, error) {
+	fluxQuery := r.buildLatestTelemetryQuery(filter)
+
+	result, err := r.queryFluxGeneric(ctx, fluxQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.parseTelemetryLatest(result)
+}
+
+func (r *telemetryRepository) buildLatestTelemetryQuery(filter domainTelemetry.DeviceFilter) string {
+	projectFilter := ""
+	if filter.Project != "" {
+		projectFilter = fmt.Sprintf(`|> filter(fn: (r) => r["project"] == "%s")`, filter.Project)
+	}
+	deviceFilter := ""
+	if filter.DeviceSN != "" {
+		deviceFilter = fmt.Sprintf(`|> filter(fn: (r) => r["device_sn"] == "%s")`, filter.DeviceSN)
+	}
+
+	return fmt.Sprintf(`
+from(bucket: "%s")
+    |> range(start: -1m)
+    |> filter(fn: (r) => r["_measurement"] == "telemetry")
+    %s
+    %s
+    |> group(columns: ["device_sn", "type", "project", "gateway_sn", "_field"])
+    |> last()
+    |> pivot(
+        rowKey:      ["device_sn", "type", "project", "gateway_sn"],
+        columnKey:   ["_field"],
+        valueColumn: "_value"
+    )
+    |> group()
+    |> yield(name: "telemetry")
+`, r.influx.bucket, projectFilter, deviceFilter)
+}
+
+func (r *telemetryRepository) parseTelemetryLatest(result influxQueryResult) (map[string]domainTelemetry.TelemetryData, error) {
+	skipCols := map[string]bool{
+		"_time": true, "_start": true, "_stop": true,
+		"_measurement": true, "device_sn": true,
+		"gateway_sn": true, "project": true, "type": true,
+		"result": true, "table": true,
+	}
+
+	telemetryMap := make(map[string]domainTelemetry.TelemetryData)
+
+	for _, series := range result.Series {
+		if series.Name != "telemetry" {
+			continue
+		}
+
+		for _, row := range series.Values {
+			rec := make(map[string]interface{})
+			for i, col := range series.Columns {
+				if i < len(row) {
+					rec[col] = row[i]
+				}
+			}
+
+			sn := toString(rec["device_sn"])
+			if sn == "" {
+				continue
+			}
+
+			if telemetryMap[sn] == nil {
+				telemetryMap[sn] = make(domainTelemetry.TelemetryData)
+			}
+
+			for k, v := range rec {
+				if skipCols[k] || v == nil {
+					continue
+				}
+				telemetryMap[sn][k] = v
+			}
+		}
+	}
+
+	return telemetryMap, nil
+}
+
+// ============================================================
+// NEW: GetTelemetryHistory — query history with time range
+// Pattern dari DEVICE_STREAM_GUIDE.md Section 5
+// ============================================================
+
+func (r *telemetryRepository) GetTelemetryHistory(ctx context.Context, filter domainTelemetry.HistoryFilter) ([]domainTelemetry.TelemetryRecord, error) {
+	fluxQuery := r.buildHistoryQuery(filter)
+
+	result, err := r.queryFluxGeneric(ctx, fluxQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.parseTelemetryHistory(result)
+}
+
+func (r *telemetryRepository) buildHistoryQuery(filter domainTelemetry.HistoryFilter) string {
+	projectFilter := ""
+	if filter.Project != "" {
+		projectFilter = fmt.Sprintf(`|> filter(fn: (r) => r["project"] == "%s")`, filter.Project)
+	}
+
+	aggregation := ""
+	if filter.Window != "" {
+		aggregation = fmt.Sprintf(`|> aggregateWindow(every: %s, fn: mean, createEmpty: false)`, filter.Window)
+	}
+
+	return fmt.Sprintf(`
+from(bucket: "%s")
+    |> range(start: %s, stop: %s)
+    |> filter(fn: (r) => r["_measurement"] == "telemetry")
+    |> filter(fn: (r) => r["device_sn"] == "%s")
+    %s
+    %s
+    |> pivot(
+        rowKey:      ["_time", "device_sn"],
+        columnKey:   ["_field"],
+        valueColumn: "_value"
+    )
+    |> sort(columns: ["_time"], desc: false)
+    |> yield(name: "history")
+`,
+		r.influx.bucket,
+		filter.TimeRange.Start.UTC().Format(time.RFC3339),
+		filter.TimeRange.Stop.UTC().Format(time.RFC3339),
+		filter.DeviceSN,
+		projectFilter,
+		aggregation)
+}
+
+func (r *telemetryRepository) parseTelemetryHistory(result influxQueryResult) ([]domainTelemetry.TelemetryRecord, error) {
+	skipCols := map[string]bool{
+		"_start": true, "_stop": true, "_measurement": true,
+		"device_sn": true, "gateway_sn": true, "project": true,
+		"type": true, "result": true, "table": true,
+	}
+
+	var records []domainTelemetry.TelemetryRecord
+
+	for _, series := range result.Series {
+		if series.Name != "history" {
+			continue
+		}
+
+		for _, row := range series.Values {
+			rec := make(map[string]interface{})
+			for i, col := range series.Columns {
+				if i < len(row) {
+					rec[col] = row[i]
+				}
+			}
+
+			fields := make(map[string]interface{})
+			var timestamp time.Time
+
+			for k, v := range rec {
+				if k == "_time" {
+					if ts, ok := v.(string); ok {
+						if t, err := time.Parse(time.RFC3339, ts); err == nil {
+							timestamp = t
+						}
+					}
+					continue
+				}
+				if skipCols[k] || v == nil {
+					continue
+				}
+				fields[k] = v
+			}
+
+			records = append(records, domainTelemetry.TelemetryRecord{
+				Timestamp: timestamp,
+				Fields:   fields,
+			})
+		}
+	}
+
+	return records, nil
+}
+
+// ============================================================
+// Helper methods
+// ============================================================
+
+// queryFluxGeneric — generic Flux query returning raw JSON result
+func (r *telemetryRepository) queryFluxGeneric(ctx context.Context, fluxQuery string) (influxQueryResult, error) {
+	params := url.Values{}
+	params.Set("org", r.influx.org)
+
+	reqURL := r.influx.url + "/api/v2/query?" + params.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewBufferString(fluxQuery))
+	if err != nil {
+		return influxQueryResult{}, err
+	}
+	req.Header.Set("Authorization", "Token "+r.influx.token)
+	req.Header.Set("Content-Type", "application/vnd.influxql; charset=utf-8")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := r.influx.httpClient.Do(req)
+	if err != nil {
+		return influxQueryResult{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return influxQueryResult{}, fmt.Errorf("influxdb query error: status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	var result influxQueryResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return influxQueryResult{}, err
+	}
+
+	return result, nil
+}
+
+// toFloat64 converts interface{} to float64 safely
+func toFloat64(v interface{}) float64 {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int64:
+		return float64(val)
+	case float32:
+		return float64(val)
+	case int:
+		return float64(val)
+	}
+	return 0
+}
+
+// toString converts interface{} to string safely
+func toString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", v)
+}

@@ -341,10 +341,27 @@ func (r *telemetryRepository) GetLatestHealth(ctx context.Context, filter domain
 	fluxQuery := r.buildHealthQuery(filter)
 
 	start := time.Now()
-	result, err := r.queryFluxGeneric(ctx, fluxQuery)
+	result, err := r.queryFluxGeneric(ctx, fluxQuery, false)
 	duration := time.Since(start).Seconds()
 
 	metrics.RecordInfluxDBQuery("get_latest_health", duration, err == nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return r.parseHealthResult(result)
+}
+
+// SSE Bypass: same as GetLatestHealth but skips circuit breaker for long-lived SSE connections
+func (r *telemetryRepository) GetLatestHealthSSE(ctx context.Context, filter domainTelemetry.DeviceFilter) ([]domainTelemetry.HealthData, error) {
+	fluxQuery := r.buildHealthQuery(filter)
+
+	start := time.Now()
+	result, err := r.queryFluxGeneric(ctx, fluxQuery, true) // bypassCB=true
+	duration := time.Since(start).Seconds()
+
+	metrics.RecordInfluxDBQuery("get_latest_health_sse", duration, err == nil)
 
 	if err != nil {
 		return nil, err
@@ -487,10 +504,27 @@ func (r *telemetryRepository) GetLatestTelemetry(ctx context.Context, filter dom
 	fluxQuery := r.buildLatestTelemetryQuery(filter)
 
 	start := time.Now()
-	result, err := r.queryFluxGeneric(ctx, fluxQuery)
+	result, err := r.queryFluxGeneric(ctx, fluxQuery, false)
 	duration := time.Since(start).Seconds()
 
 	metrics.RecordInfluxDBQuery("get_latest_telemetry", duration, err == nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return r.parseTelemetryLatest(result)
+}
+
+// SSE Bypass: same as GetLatestTelemetry but skips circuit breaker for long-lived SSE connections
+func (r *telemetryRepository) GetLatestTelemetrySSE(ctx context.Context, filter domainTelemetry.DeviceFilter) (map[string]domainTelemetry.TelemetryData, error) {
+	fluxQuery := r.buildLatestTelemetryQuery(filter)
+
+	start := time.Now()
+	result, err := r.queryFluxGeneric(ctx, fluxQuery, true) // bypassCB=true
+	duration := time.Since(start).Seconds()
+
+	metrics.RecordInfluxDBQuery("get_latest_telemetry_sse", duration, err == nil)
 
 	if err != nil {
 		return nil, err
@@ -571,7 +605,7 @@ func (r *telemetryRepository) GetTelemetryHistory(ctx context.Context, filter do
 	fluxQuery := r.buildHistoryQuery(filter)
 
 	start := time.Now()
-	result, err := r.queryFluxGeneric(ctx, fluxQuery)
+	result, err := r.queryFluxGeneric(ctx, fluxQuery, false)
 	duration := time.Since(start).Seconds()
 
 	metrics.RecordInfluxDBQuery("get_telemetry_history", duration, err == nil)
@@ -686,12 +720,13 @@ func (r *telemetryRepository) parseTelemetryHistory(result influxQueryResult) ([
 // ============================================================
 
 // queryFluxGeneric — generic Flux query with circuit breaker + connection pooling
-func (r *telemetryRepository) queryFluxGeneric(ctx context.Context, fluxQuery string) (influxQueryResult, error) {
+// Set bypassCB=true to skip circuit breaker (for long-lived SSE connections)
+func (r *telemetryRepository) queryFluxGeneric(ctx context.Context, fluxQuery string, bypassCB bool) (influxQueryResult, error) {
 	var result influxQueryResult
 	var queryErr error
 
-	// Execute through circuit breaker
-	err := r.influx.cb.Execute(ctx, func(ctx context.Context) error {
+	// Define the actual query execution
+	executeQuery := func() error {
 		params := url.Values{}
 		params.Set("org", r.influx.org)
 
@@ -727,7 +762,18 @@ func (r *telemetryRepository) queryFluxGeneric(ctx context.Context, fluxQuery st
 		}
 
 		return queryErr
-	})
+	}
+
+	var err error
+	if bypassCB {
+		// SSE/bypass: execute directly without circuit breaker
+		err = executeQuery()
+	} else {
+		// Normal: execute through circuit breaker
+		err = r.influx.cb.Execute(ctx, func(ctx context.Context) error {
+			return executeQuery()
+		})
+	}
 
 	if err != nil {
 		return influxQueryResult{}, err

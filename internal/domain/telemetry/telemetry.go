@@ -116,6 +116,10 @@ type TelemetryRepository interface {
 	GetLatestHealth(ctx context.Context, filter DeviceFilter) ([]HealthData, error)
 	GetLatestTelemetry(ctx context.Context, filter DeviceFilter) (map[string]TelemetryData, error)
 	GetTelemetryHistory(ctx context.Context, filter HistoryFilter) ([]TelemetryRecord, error)
+
+	// SSE Bypass: same queries but skip circuit breaker for long-lived connections
+	GetLatestHealthSSE(ctx context.Context, filter DeviceFilter) ([]HealthData, error)
+	GetLatestTelemetrySSE(ctx context.Context, filter DeviceFilter) (map[string]TelemetryData, error)
 }
 
 // ============================================================

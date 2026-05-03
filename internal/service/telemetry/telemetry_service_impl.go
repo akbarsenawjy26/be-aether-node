@@ -132,13 +132,13 @@ func (s *telemetryService) GetHistory(ctx context.Context, deviceSN string, quer
 func (s *telemetryService) StreamAllDevicesWithHealth(ctx context.Context, project string) (domainTelemetry.DevicePayload, error) {
 	filter := domainTelemetry.DeviceFilter{Project: project}
 
-	// Query health dan telemetry secara terpisah
-	healthList, err := s.repo.GetLatestHealth(ctx, filter)
+	// Query health dan telemetry secara terpisah (use SSE bypass methods to avoid circuit breaker)
+	healthList, err := s.repo.GetLatestHealthSSE(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 
-	telemetryMap, err := s.repo.GetLatestTelemetry(ctx, filter)
+	telemetryMap, err := s.repo.GetLatestTelemetrySSE(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -167,8 +167,8 @@ func (s *telemetryService) StreamAllDevicesWithHealth(ctx context.Context, proje
 func (s *telemetryService) StreamDeviceWithHealth(ctx context.Context, project, deviceSN string) (*domainTelemetry.DeviceEntry, error) {
 	filter := domainTelemetry.DeviceFilter{Project: project, DeviceSN: deviceSN}
 
-	// Query health dan telemetry secara terpisah
-	healthList, err := s.repo.GetLatestHealth(ctx, filter)
+	// Query health dan telemetry secara terpisah (use SSE bypass methods to avoid circuit breaker)
+	healthList, err := s.repo.GetLatestHealthSSE(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (s *telemetryService) StreamDeviceWithHealth(ctx context.Context, project, 
 		return nil, nil // device not found
 	}
 
-	telemetryMap, err := s.repo.GetLatestTelemetry(ctx, filter)
+	telemetryMap, err := s.repo.GetLatestTelemetrySSE(ctx, filter)
 	if err != nil {
 		return nil, err
 	}

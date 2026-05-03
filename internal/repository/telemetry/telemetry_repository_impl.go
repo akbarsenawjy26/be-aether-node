@@ -3,11 +3,14 @@ package telemetry
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	domainTelemetry "aether-node/internal/domain/telemetry"
@@ -191,7 +194,7 @@ func (r *telemetryRepository) queryFlux(ctx context.Context, fluxQuery string) (
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Token "+r.influx.token)
-	req.Header.Set("Content-Type", "application/vnd.influxql; charset=utf-8")
+	req.Header.Set("Content-Type", "application/vnd.flux")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := r.influx.httpClient.Do(req)
@@ -342,61 +345,110 @@ from(bucket: "%s")
     |> filter(fn: (r) => r["_measurement"] == "health")
     %s
     %s
-    |> group(columns: ["device_sn", "type", "project", "gateway_sn", "model"])
+    |> group(columns: ["device_sn", "type", "project", "gateway_sn", "model", "_field"])
     |> last()
-    |> pivot(
-        rowKey:      ["device_sn", "type", "project", "gateway_sn", "model"],
-        columnKey:   ["_field"],
-        valueColumn: "_value"
-    )
-    |> group()
-    |> yield(name: "health")
 `, r.influx.bucket, projectFilter, deviceFilter)
 }
 
 func (r *telemetryRepository) parseHealthResult(result influxQueryResult) ([]domainTelemetry.HealthData, error) {
-	var list []domainTelemetry.HealthData
+	// Group by device_sn - collect all field values for each device
+	deviceMap := make(map[string]*domainTelemetry.HealthData)
 
 	for _, series := range result.Series {
-		if series.Name != "health" {
+		// Skip non-health series
+		if len(series.Columns) == 0 || len(series.Values) == 0 {
 			continue
 		}
 
-		for _, row := range series.Values {
-			rec := make(map[string]interface{})
-			for i, col := range series.Columns {
-				if i < len(row) {
-					rec[col] = row[i]
-				}
-			}
-
-			lastSeen := time.Now()
-			if v, ok := rec["_time"].(string); ok {
-				if t, err := time.Parse(time.RFC3339, v); err == nil {
-					lastSeen = t
-				}
-			}
-
-			status := "online"
-			if time.Since(lastSeen) > offlineThreshold {
-				status = "offline"
-			}
-
-			list = append(list, domainTelemetry.HealthData{
-				DeviceSN:    toString(rec["device_sn"]),
-				GatewaySN:   toString(rec["gateway_sn"]),
-				Project:     toString(rec["project"]),
-				Type:        toString(rec["type"]),
-				Model:       toString(rec["model"]),
-				Status:      status,
-				Uptime:      toFloat64(rec["uptime"]),
-				Temp:        toFloat64(rec["temp"]),
-				Hum:         toFloat64(rec["hum"]),
-				RSSI:        toFloat64(rec["rssi"]),
-				ResetReason: toString(rec["reset_reason"]),
-				LastSeen:    lastSeen,
-			})
+		// Find column indices
+		colIdx := make(map[string]int)
+		for i, col := range series.Columns {
+			colIdx[col] = i
 		}
+
+		for _, row := range series.Values {
+			// Get device_sn (required)
+			deviceSN := ""
+			if i, ok := colIdx["device_sn"]; ok && i < len(row) {
+				deviceSN = toString(row[i])
+			}
+			if deviceSN == "" {
+				continue
+			}
+
+			// Get or create device entry
+			if _, exists := deviceMap[deviceSN]; !exists {
+				deviceMap[deviceSN] = &domainTelemetry.HealthData{
+					DeviceSN: deviceSN,
+				}
+			}
+			dev := deviceMap[deviceSN]
+
+			// Extract tags/attributes
+			if i, ok := colIdx["gateway_sn"]; ok && i < len(row) {
+				dev.GatewaySN = toString(row[i])
+			}
+			if i, ok := colIdx["project"]; ok && i < len(row) {
+				dev.Project = toString(row[i])
+			}
+			if i, ok := colIdx["type"]; ok && i < len(row) {
+				dev.Type = toString(row[i])
+			}
+			if i, ok := colIdx["model"]; ok && i < len(row) {
+				dev.Model = toString(row[i])
+			}
+
+			// Get _field and _value
+			fieldName := ""
+			var fieldValue interface{}
+			if i, ok := colIdx["_field"]; ok && i < len(row) {
+				fieldName = toString(row[i])
+			}
+			if i, ok := colIdx["_value"]; ok && i < len(row) {
+				fieldValue = row[i]
+			}
+
+			// Parse field value based on field name
+			switch fieldName {
+			case "uptime":
+				dev.Uptime = toFloat64(fieldValue)
+			case "temp":
+				dev.Temp = toFloat64(fieldValue)
+			case "hum":
+				dev.Hum = toFloat64(fieldValue)
+			case "rssi":
+				dev.RSSI = toFloat64(fieldValue)
+			case "reset_reason":
+				dev.ResetReason = toString(fieldValue)
+			}
+
+			// Get last_seen from _time
+			if i, ok := colIdx["_time"]; ok && i < len(row) {
+				if ts, ok := row[i].(string); ok {
+					if t, err := time.Parse(time.RFC3339, ts); err == nil {
+						if t.After(dev.LastSeen) {
+							dev.LastSeen = t
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Convert to slice
+	list := make([]domainTelemetry.HealthData, 0, len(deviceMap))
+	now := time.Now()
+	for _, dev := range deviceMap {
+		// Set status based on last_seen
+		if dev.LastSeen.IsZero() {
+			dev.LastSeen = now
+		}
+		if now.Sub(dev.LastSeen) > offlineThreshold {
+			dev.Status = "offline"
+		} else {
+			dev.Status = "online"
+		}
+		list = append(list, *dev)
 	}
 
 	return list, nil
@@ -436,53 +488,44 @@ from(bucket: "%s")
     %s
     |> group(columns: ["device_sn", "type", "project", "gateway_sn", "_field"])
     |> last()
-    |> pivot(
-        rowKey:      ["device_sn", "type", "project", "gateway_sn"],
-        columnKey:   ["_field"],
-        valueColumn: "_value"
-    )
-    |> group()
-    |> yield(name: "telemetry")
 `, r.influx.bucket, projectFilter, deviceFilter)
 }
 
 func (r *telemetryRepository) parseTelemetryLatest(result influxQueryResult) (map[string]domainTelemetry.TelemetryData, error) {
-	skipCols := map[string]bool{
-		"_time": true, "_start": true, "_stop": true,
-		"_measurement": true, "device_sn": true,
-		"gateway_sn": true, "project": true, "type": true,
-		"result": true, "table": true,
-	}
-
 	telemetryMap := make(map[string]domainTelemetry.TelemetryData)
 
 	for _, series := range result.Series {
-		if series.Name != "telemetry" {
+		if len(series.Columns) == 0 || len(series.Values) == 0 {
 			continue
 		}
 
-		for _, row := range series.Values {
-			rec := make(map[string]interface{})
-			for i, col := range series.Columns {
-				if i < len(row) {
-					rec[col] = row[i]
-				}
-			}
+		// Find column indices
+		colIdx := make(map[string]int)
+		for i, col := range series.Columns {
+			colIdx[col] = i
+		}
 
-			sn := toString(rec["device_sn"])
+		for _, row := range series.Values {
+			// Get device_sn
+			sn := ""
+			if i, ok := colIdx["device_sn"]; ok && i < len(row) {
+				sn = toString(row[i])
+			}
 			if sn == "" {
 				continue
 			}
 
-			if telemetryMap[sn] == nil {
+			if _, exists := telemetryMap[sn]; !exists {
 				telemetryMap[sn] = make(domainTelemetry.TelemetryData)
 			}
 
-			for k, v := range rec {
-				if skipCols[k] || v == nil {
-					continue
-				}
-				telemetryMap[sn][k] = v
+			// Get _field and _value
+			fieldName := ""
+			if i, ok := colIdx["_field"]; ok && i < len(row) {
+				fieldName = toString(row[i])
+			}
+			if i, ok := colIdx["_value"]; ok && i < len(row) && row[i] != nil {
+				telemetryMap[sn][fieldName] = row[i]
 			}
 		}
 	}
@@ -524,13 +567,9 @@ from(bucket: "%s")
     |> filter(fn: (r) => r["device_sn"] == "%s")
     %s
     %s
-    |> pivot(
-        rowKey:      ["_time", "device_sn"],
-        columnKey:   ["_field"],
-        valueColumn: "_value"
-    )
+    |> group(columns: ["_time", "device_sn", "_field"])
+    |> last()
     |> sort(columns: ["_time"], desc: false)
-    |> yield(name: "history")
 `,
 		r.influx.bucket,
 		filter.TimeRange.Start.UTC().Format(time.RFC3339),
@@ -541,49 +580,67 @@ from(bucket: "%s")
 }
 
 func (r *telemetryRepository) parseTelemetryHistory(result influxQueryResult) ([]domainTelemetry.TelemetryRecord, error) {
-	skipCols := map[string]bool{
-		"_start": true, "_stop": true, "_measurement": true,
-		"device_sn": true, "gateway_sn": true, "project": true,
-		"type": true, "result": true, "table": true,
-	}
-
-	var records []domainTelemetry.TelemetryRecord
+	// Group records by timestamp
+	timestampMap := make(map[string]*domainTelemetry.TelemetryRecord)
 
 	for _, series := range result.Series {
-		if series.Name != "history" {
+		if len(series.Columns) == 0 || len(series.Values) == 0 {
 			continue
 		}
 
+		// Find column indices
+		colIdx := make(map[string]int)
+		for i, col := range series.Columns {
+			colIdx[col] = i
+		}
+
 		for _, row := range series.Values {
-			rec := make(map[string]interface{})
-			for i, col := range series.Columns {
-				if i < len(row) {
-					rec[col] = row[i]
-				}
-			}
-
-			fields := make(map[string]interface{})
-			var timestamp time.Time
-
-			for k, v := range rec {
-				if k == "_time" {
-					if ts, ok := v.(string); ok {
-						if t, err := time.Parse(time.RFC3339, ts); err == nil {
-							timestamp = t
-						}
+			// Get _time
+			timestamp := time.Time{}
+			if i, ok := colIdx["_time"]; ok && i < len(row) {
+				if ts, ok := row[i].(string); ok {
+					if t, err := time.Parse(time.RFC3339, ts); err == nil {
+						timestamp = t
 					}
-					continue
 				}
-				if skipCols[k] || v == nil {
-					continue
-				}
-				fields[k] = v
 			}
 
-			records = append(records, domainTelemetry.TelemetryRecord{
-				Timestamp: timestamp,
-				Fields:   fields,
-			})
+			tsKey := timestamp.Format(time.RFC3339Nano)
+			if _, exists := timestampMap[tsKey]; !exists {
+				timestampMap[tsKey] = &domainTelemetry.TelemetryRecord{
+					Timestamp: timestamp,
+					Fields:   make(map[string]interface{}),
+				}
+			}
+
+			// Get _field and _value
+			fieldName := ""
+			var fieldValue interface{}
+			if i, ok := colIdx["_field"]; ok && i < len(row) {
+				fieldName = toString(row[i])
+			}
+			if i, ok := colIdx["_value"]; ok && i < len(row) && row[i] != nil {
+				fieldValue = row[i]
+			}
+
+			if fieldName != "" {
+				timestampMap[tsKey].Fields[fieldName] = fieldValue
+			}
+		}
+	}
+
+	// Convert to slice and sort by timestamp
+	records := make([]domainTelemetry.TelemetryRecord, 0, len(timestampMap))
+	for _, rec := range timestampMap {
+		records = append(records, *rec)
+	}
+
+	// Sort by timestamp ascending
+	for i := 0; i < len(records)-1; i++ {
+		for j := i + 1; j < len(records); j++ {
+			if records[j].Timestamp.Before(records[i].Timestamp) {
+				records[i], records[j] = records[j], records[i]
+			}
 		}
 	}
 
@@ -594,7 +651,7 @@ func (r *telemetryRepository) parseTelemetryHistory(result influxQueryResult) ([
 // Helper methods
 // ============================================================
 
-// queryFluxGeneric — generic Flux query returning raw JSON result
+// queryFluxGeneric — generic Flux query returning parsed CSV result
 func (r *telemetryRepository) queryFluxGeneric(ctx context.Context, fluxQuery string) (influxQueryResult, error) {
 	params := url.Values{}
 	params.Set("org", r.influx.org)
@@ -605,7 +662,7 @@ func (r *telemetryRepository) queryFluxGeneric(ctx context.Context, fluxQuery st
 		return influxQueryResult{}, err
 	}
 	req.Header.Set("Authorization", "Token "+r.influx.token)
-	req.Header.Set("Content-Type", "application/vnd.influxql; charset=utf-8")
+	req.Header.Set("Content-Type", "application/vnd.flux")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := r.influx.httpClient.Do(req)
@@ -619,12 +676,155 @@ func (r *telemetryRepository) queryFluxGeneric(ctx context.Context, fluxQuery st
 		return influxQueryResult{}, fmt.Errorf("influxdb query error: status=%d body=%s", resp.StatusCode, string(body))
 	}
 
-	var result influxQueryResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	// Parse CSV response from InfluxDB 2.x Flux API
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return influxQueryResult{}, err
 	}
 
+	return parseFluxCSV(string(body))
+}
+
+// parseFluxCSV parses InfluxDB 2.x Flux CSV response into influxQueryResult
+// CSV format: ,result,table,_start,_stop,_time,_value,_field,_measurement,tags...
+// Multiple tables (results) separated by empty lines
+func parseFluxCSV(csvData string) (influxQueryResult, error) {
+	reader := csv.NewReader(strings.NewReader(csvData))
+	reader.FieldsPerRecord = -1 // Allow varying fields
+	reader.LazyQuotes = true
+
+	records, err := reader.ReadAll()
+	if err != nil {
+		return influxQueryResult{}, fmt.Errorf("failed to parse CSV: %w", err)
+	}
+
+	if len(records) < 2 {
+		return influxQueryResult{}, nil
+	}
+
+	// Parse header row - first column is empty (result index)
+	header := records[0]
+	// header[0] is empty string "", columns start from index 1
+	// columns: "", "result", "table", "_start", "_stop", "_time", "_value", "_field", "_measurement", ...
+
+	// Build column index map
+	colIndex := make(map[string]int)
+	for i, col := range header {
+		colIndex[col] = i
+	}
+
+	result := influxQueryResult{
+		Series: []struct {
+			Name   string            `json:"name"`
+			Tags   map[string]string `json:"tags"`
+			Columns []string         `json:"columns"`
+			Values  [][]interface{}  `json:"values"`
+		}{},
+	}
+
+	// Group rows by result+table
+	tableMap := make(map[string]int) // key: "result,table" -> series index
+
+	for rowIdx := 1; rowIdx < len(records); rowIdx++ {
+		row := records[rowIdx]
+		if len(row) == 0 {
+			continue // skip empty lines
+		}
+
+		// Skip rows that don't have enough columns
+		if len(row) < 5 {
+			continue
+		}
+
+		// Parse result and table number
+		resultName := ""
+		tableNum := 0
+		if idx, ok := colIndex["result"]; ok && idx < len(row) {
+			resultName = row[idx]
+		}
+		if idx, ok := colIndex["table"]; ok && idx < len(row) {
+			if v, err := strconv.Atoi(row[idx]); err == nil {
+				tableNum = v
+			}
+		}
+
+		key := fmt.Sprintf("%s,%d", resultName, tableNum)
+		seriesIdx, exists := tableMap[key]
+		if !exists {
+			seriesIdx = len(result.Series)
+			tableMap[key] = seriesIdx
+
+			// Get measurement name
+			measurementName := "unknown"
+			if idx, ok := colIndex["_measurement"]; ok && idx < len(row) {
+				measurementName = row[idx]
+			}
+
+			// Extract tag columns (columns that start with specific tags or are in the tag set)
+			tags := make(map[string]string)
+			tagColumns := []string{"device_sn", "project", "type", "gateway_sn", "model"}
+			for _, tagCol := range tagColumns {
+				if idx, ok := colIndex[tagCol]; ok && idx < len(row) && row[idx] != "" {
+					tags[tagCol] = row[idx]
+				}
+			}
+
+			// Extract column names (all columns except internal _ columns and result/table)
+			columns := []string{}
+			for i, col := range header {
+				if i == 0 || col == "result" || col == "table" || col == "_start" || col == "_stop" || col == "_time" {
+					continue
+				}
+				columns = append(columns, col)
+			}
+
+			result.Series = append(result.Series, struct {
+				Name   string            `json:"name"`
+				Tags   map[string]string `json:"tags"`
+				Columns []string         `json:"columns"`
+				Values  [][]interface{}  `json:"values"`
+			}{
+				Name:    measurementName,
+				Tags:    tags,
+				Columns: columns,
+				Values:  [][]interface{}{},
+			})
+		}
+
+		// Extract values for this row
+		values := []interface{}{}
+		for i, col := range header {
+			if i == 0 || col == "result" || col == "table" || col == "_start" || col == "_stop" || col == "_time" {
+				continue
+			}
+			if i < len(row) {
+				values = append(values, parseValue(row[i]))
+			} else {
+				values = append(values, nil)
+			}
+		}
+
+		result.Series[seriesIdx].Values = append(result.Series[seriesIdx].Values, values)
+	}
+
 	return result, nil
+}
+
+// parseValue converts string to appropriate type
+func parseValue(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	// Try int
+	if v, err := strconv.Atoi(s); err == nil {
+		return v
+	}
+	// Try float
+	if v, err := strconv.ParseFloat(s, 64); err == nil {
+		return v
+	}
+	// Return as string
+	return s
 }
 
 // toFloat64 converts interface{} to float64 safely

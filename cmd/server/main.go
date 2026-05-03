@@ -10,6 +10,7 @@ import (
 
 	"aether-node/config"
 	"aether-node/internal/db"
+	"aether-node/internal/ratelimit"
 	"aether-node/pkg/logger"
 	"aether-node/pkg/middleware"
 
@@ -113,6 +114,7 @@ func main() {
 
 	// Setup Echo
 	e := echo.New()
+	e.HideBanner = true
 
 	// Middleware
 	e.Use(middleware.RequestLogger())
@@ -121,6 +123,9 @@ func main() {
 		AllowOrigins: cfg.Server.CORSOrigins(),
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 	}))
+
+	// Rate limiting: 100 requests per minute per IP (global)
+	e.Use(ratelimit.Global(100, time.Minute))
 
 	// Health check endpoints
 	e.GET("/health", healthHandler.GetHealth)
@@ -187,7 +192,7 @@ func main() {
 	// Telemetry ingestion
 	e.POST("/telemetry", telemetryHandler.WriteTelemetry)
 
-	// Graceful shutdown
+	// Graceful shutdown with connection drain
 	go func() {
 		if err := e.Start(cfg.Server.Address()); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Str("component", "server").Msg("Server error")
@@ -199,11 +204,31 @@ func main() {
 	<-quit
 
 	log.Info().Str("component", "server").Msg("Shutting down server...")
+
+	// Create shutdown context with timeout (reuse existing ctx variable)
 	ctx, cancel = context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeoutDuration())
 	defer cancel()
 
-	if err := e.Shutdown(ctx); err != nil {
-		log.Fatal().Err(err).Str("component", "server").Msg("Server shutdown error")
+	// First: stop accepting new connections
+	if err := e.Close(); err != nil {
+		log.Error().Err(err).Str("component", "server").Msg("Error closing server")
+	}
+
+	// Second: wait for existing connections to drain (up to timeout)
+	shutdownDone := make(chan struct{})
+	go func() {
+		if err := e.Shutdown(ctx); err != nil {
+			log.Warn().Err(err).Str("component", "server").Msg("Graceful shutdown incomplete")
+		}
+		close(shutdownDone)
+	}()
+
+	// Wait for shutdown or timeout
+	select {
+	case <-shutdownDone:
+		log.Info().Str("component", "server").Msg("Server drained successfully")
+	case <-ctx.Done():
+		log.Warn().Str("component", "server").Msg("Shutdown timeout reached, forcing exit")
 	}
 
 	log.Info().Str("component", "server").Msg("Server stopped")

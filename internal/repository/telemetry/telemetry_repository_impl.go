@@ -14,6 +14,7 @@ import (
 	"time"
 
 	domainTelemetry "aether-node/internal/domain/telemetry"
+	"aether-node/internal/circuitbreaker"
 	"aether-node/internal/metrics"
 )
 
@@ -24,17 +25,34 @@ type influxHTTPClient struct {
 	org    string
 	bucket string
 	httpClient *http.Client
+	cb *circuitbreaker.CircuitBreaker
 }
 
 func newInfluxHTTPClient(url, token, org, bucket string) *influxHTTPClient {
+	// Create HTTP client with connection pooling
+	transport := &http.Transport{
+		MaxIdleConns:        100,              // max idle connections per host
+		MaxIdleConnsPerHost: 10,               // max idle per host (InfluxDB)
+		IdleConnTimeout:     90 * time.Second, // how long idle connections live
+		DisableKeepAlives:   false,
+	}
+
 	return &influxHTTPClient{
 		url:    url,
 		token:  token,
 		org:    org,
 		bucket: bucket,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Transport: transport,
+			Timeout:   30 * time.Second,
 		},
+		cb: circuitbreaker.New(circuitbreaker.Config{
+			Name:                 "influxdb",
+			FailureThreshold:     5,
+			SuccessThreshold:     2,
+			Timeout:              30 * time.Second,
+			MaxConcurrentRequests: 10,
+		}),
 	}
 }
 
@@ -667,38 +685,55 @@ func (r *telemetryRepository) parseTelemetryHistory(result influxQueryResult) ([
 // Helper methods
 // ============================================================
 
-// queryFluxGeneric — generic Flux query returning parsed CSV result
+// queryFluxGeneric — generic Flux query with circuit breaker + connection pooling
 func (r *telemetryRepository) queryFluxGeneric(ctx context.Context, fluxQuery string) (influxQueryResult, error) {
-	params := url.Values{}
-	params.Set("org", r.influx.org)
+	var result influxQueryResult
+	var queryErr error
 
-	reqURL := r.influx.url + "/api/v2/query?" + params.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewBufferString(fluxQuery))
+	// Execute through circuit breaker
+	err := r.influx.cb.Execute(ctx, func(ctx context.Context) error {
+		params := url.Values{}
+		params.Set("org", r.influx.org)
+
+		reqURL := r.influx.url + "/api/v2/query?" + params.Encode()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewBufferString(fluxQuery))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Token "+r.influx.token)
+		req.Header.Set("Content-Type", "application/vnd.flux")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := r.influx.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("influxdb query error: status=%d body=%s", resp.StatusCode, string(body))
+		}
+
+		// Parse CSV response
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		result, err = parseFluxCSV(string(body))
+		if err != nil {
+			queryErr = err
+		}
+
+		return queryErr
+	})
+
 	if err != nil {
 		return influxQueryResult{}, err
 	}
-	req.Header.Set("Authorization", "Token "+r.influx.token)
-	req.Header.Set("Content-Type", "application/vnd.flux")
-	req.Header.Set("Accept", "application/json")
 
-	resp, err := r.influx.httpClient.Do(req)
-	if err != nil {
-		return influxQueryResult{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return influxQueryResult{}, fmt.Errorf("influxdb query error: status=%d body=%s", resp.StatusCode, string(body))
-	}
-
-	// Parse CSV response from InfluxDB 2.x Flux API
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return influxQueryResult{}, err
-	}
-
-	return parseFluxCSV(string(body))
+	return result, nil
 }
 
 // parseFluxCSV parses InfluxDB 2.x Flux CSV response into influxQueryResult

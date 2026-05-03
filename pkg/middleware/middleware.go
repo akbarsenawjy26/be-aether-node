@@ -3,6 +3,7 @@ package middleware
 import (
 	"time"
 
+	"aether-node/internal/metrics"
 	"aether-node/pkg/logger"
 
 	"github.com/google/uuid"
@@ -49,6 +50,11 @@ func RequestLogger() echo.MiddlewareFunc {
 			// Calculate latency
 			latency := time.Since(start)
 
+			// Record Prometheus metrics
+			duration := latency.Seconds()
+			status := res.Status
+			metrics.RecordHTTPRequest(req.Method, req.URL.Path, status, duration)
+
 			// Build log event
 			event := log.Info()
 			if err != nil {
@@ -59,7 +65,7 @@ func RequestLogger() echo.MiddlewareFunc {
 			event.
 				Str("method", req.Method).
 				Str("path", req.URL.Path).
-				Int("status", res.Status).
+				Int("status", status).
 				Dur("latency", latency).
 				Str("remote_ip", c.RealIP()).
 				Int64("bytes_out", res.Size).

@@ -13,6 +13,8 @@ import (
 	"aether-node/pkg/logger"
 	"aether-node/pkg/middleware"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	apikeyRepo "aether-node/internal/repository/apikey"
 	authRepo "aether-node/internal/repository/auth"
 	deviceRepo "aether-node/internal/repository/device"
@@ -124,6 +126,9 @@ func main() {
 	e.GET("/health", healthHandler.GetHealth)
 	e.GET("/health/live", healthHandler.Liveness)
 	e.GET("/health/ready", healthHandler.Readiness)
+
+	// Prometheus metrics endpoint
+	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 
 	// Auth routes (public)
 	authGroup := e.Group("/auth")

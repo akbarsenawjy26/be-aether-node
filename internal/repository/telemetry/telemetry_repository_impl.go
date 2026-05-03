@@ -14,6 +14,7 @@ import (
 	"time"
 
 	domainTelemetry "aether-node/internal/domain/telemetry"
+	"aether-node/internal/metrics"
 )
 
 // InfluxDB HTTP client — direct API calls, no SDK dependency
@@ -321,7 +322,12 @@ const offlineThreshold = 30 * time.Second
 func (r *telemetryRepository) GetLatestHealth(ctx context.Context, filter domainTelemetry.DeviceFilter) ([]domainTelemetry.HealthData, error) {
 	fluxQuery := r.buildHealthQuery(filter)
 
+	start := time.Now()
 	result, err := r.queryFluxGeneric(ctx, fluxQuery)
+	duration := time.Since(start).Seconds()
+
+	metrics.RecordInfluxDBQuery("get_latest_health", duration, err == nil)
+
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +468,12 @@ func (r *telemetryRepository) parseHealthResult(result influxQueryResult) ([]dom
 func (r *telemetryRepository) GetLatestTelemetry(ctx context.Context, filter domainTelemetry.DeviceFilter) (map[string]domainTelemetry.TelemetryData, error) {
 	fluxQuery := r.buildLatestTelemetryQuery(filter)
 
+	start := time.Now()
 	result, err := r.queryFluxGeneric(ctx, fluxQuery)
+	duration := time.Since(start).Seconds()
+
+	metrics.RecordInfluxDBQuery("get_latest_telemetry", duration, err == nil)
+
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +552,12 @@ func (r *telemetryRepository) parseTelemetryLatest(result influxQueryResult) (ma
 func (r *telemetryRepository) GetTelemetryHistory(ctx context.Context, filter domainTelemetry.HistoryFilter) ([]domainTelemetry.TelemetryRecord, error) {
 	fluxQuery := r.buildHistoryQuery(filter)
 
+	start := time.Now()
 	result, err := r.queryFluxGeneric(ctx, fluxQuery)
+	duration := time.Since(start).Seconds()
+
+	metrics.RecordInfluxDBQuery("get_telemetry_history", duration, err == nil)
+
 	if err != nil {
 		return nil, err
 	}

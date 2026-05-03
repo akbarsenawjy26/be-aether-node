@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"aether-node/internal/domain/telemetry"
+	"aether-node/internal/metrics"
 	"aether-node/pkg/response"
 
 	"github.com/labstack/echo/v4"
@@ -48,6 +49,10 @@ func (h *TelemetryHandler) StreamAllDevices(c echo.Context) error {
 
 	// Set SSE headers
 	setSSEHeaders(c)
+
+	// Record SSE connection open
+	metrics.RecordSSEConnection(true)
+	defer metrics.RecordSSEConnection(false)
 
 	// Send first data immediately (avoid 5s delay on client)
 	if err := h.sendAllDevices(c, project); err != nil {
@@ -98,6 +103,10 @@ func (h *TelemetryHandler) StreamDevice(c echo.Context) error {
 	// Set SSE headers
 	setSSEHeaders(c)
 
+	// Record SSE connection open
+	metrics.RecordSSEConnection(true)
+	defer metrics.RecordSSEConnection(false)
+
 	// Send first data immediately (avoid 5s delay on client)
 	if err := h.sendDevice(c, project, deviceSN); err != nil {
 		writeSSEError(c, err)
@@ -130,6 +139,12 @@ func (h *TelemetryHandler) sendDevice(c echo.Context, project, deviceSN string) 
 	if entry == nil {
 		return fmt.Errorf("device not found: %s", deviceSN)
 	}
+
+	// Record SSE event sent (by device type)
+	if entry.Health.Type != "" {
+		metrics.RecordSSEEvent(entry.Health.Type)
+	}
+
 	return writeSSEData(c, entry)
 }
 

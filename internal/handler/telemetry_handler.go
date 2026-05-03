@@ -56,10 +56,10 @@ func (h *TelemetryHandler) StreamAllDevices(c echo.Context) error {
 		case <-ticker.C:
 			fmt.Fprintf(c.Response(), ": keep-alive\n\n")
 			if flusher, ok := c.Response().Writer.(http.Flusher); ok {
-				flusher.Flush()
-			}
+			flusher.Flush()
 		}
 	}
+}
 }
 
 // StreamDevice handles GET /stream/:device-sn - SSE for specific device
@@ -102,10 +102,10 @@ func (h *TelemetryHandler) StreamDevice(c echo.Context) error {
 		case <-ticker.C:
 			fmt.Fprintf(c.Response(), ": keep-alive\n\n")
 			if flusher, ok := c.Response().Writer.(http.Flusher); ok {
-				flusher.Flush()
-			}
+			flusher.Flush()
 		}
 	}
+}
 }
 
 // GetHistory handles POST /history/telemetry/:device-sn

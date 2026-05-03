@@ -41,7 +41,7 @@ func (s *telemetryService) startPublisher() {
 		}
 
 		for _, t := range data {
-			select {
+		select {
 			case s.allDevices <- t:
 			default:
 			}
@@ -87,11 +87,11 @@ func (s *telemetryService) StreamAllDevices(ctx context.Context) (<-chan *domain
 	errChan := make(chan error, 1)
 
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
+	for {
+		select {
+		case <-ctx.Done():
 				close(telemetryChan)
-				return
+			return
 			case t := <-s.allDevices:
 				telemetryChan <- t
 			}

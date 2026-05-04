@@ -228,7 +228,10 @@ func JWTAuthErrorHandlerFunc(err error) error {
 // JWTAuthErrorHandlerWithContext is the ErrorHandlerWithContext for JWT middleware.
 // It directly writes the error response with specific error codes.
 func JWTAuthErrorHandlerWithContext(err error, c echo.Context) error {
+	l := ComponentLogger("jwt-auth-handler")
+
 	if c.Response().Committed {
+		l.Warn().Msg("Response already committed, returning nil")
 		return nil
 	}
 
@@ -264,7 +267,8 @@ func JWTAuthErrorHandlerWithContext(err error, c echo.Context) error {
 		return response.Error(c, code, errCode, message)
 	}
 
-	// DEBUG: print error type and message
+	// DEBUG: print error type and message AND the auth header using zerolog
+	authHeader := c.Request().Header.Get("Authorization")
 	var errType string
 	switch err.(type) {
 	case *echo.HTTPError:
@@ -274,8 +278,12 @@ func JWTAuthErrorHandlerWithContext(err error, c echo.Context) error {
 	default:
 		errType = "unknown"
 	}
-	println("DEBUG errType:", errType)
-	println("DEBUG errMsg:", err.Error())
+	l = ComponentLogger("jwt-debug")
+	l.Debug().
+		Str("errType", errType).
+		Str("errMsg", err.Error()).
+		Str("authHeader", authHeader).
+		Msg("JWT error debug")
 	if err == jwt.ErrTokenExpired {
 		println("DEBUG: Direct match with jwt.ErrTokenExpired!")
 	}
@@ -351,6 +359,11 @@ func JWTAuthErrorHandlerWithContext(err error, c echo.Context) error {
 	}
 
 	// Send JSON error response directly
+	l.Error().
+		Int("code", code).
+		Str("errCode", errCode).
+		Str("message", message).
+		Msg("About to call response.Error with")
 	if c.Request().Method == http.MethodHead {
 		return c.NoContent(code)
 	}

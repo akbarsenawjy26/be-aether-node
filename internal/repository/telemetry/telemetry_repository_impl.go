@@ -605,7 +605,7 @@ func (r *telemetryRepository) GetTelemetryHistory(ctx context.Context, filter do
 	fluxQuery := r.buildHistoryQuery(filter)
 
 	start := time.Now()
-	result, err := r.queryFluxGeneric(ctx, fluxQuery, false)
+	result, err := r.queryFluxGeneric(ctx, fluxQuery, true) // bypass CB for history queries
 	duration := time.Since(start).Seconds()
 
 	metrics.RecordInfluxDBQuery("get_telemetry_history", duration, err == nil)
@@ -731,7 +731,7 @@ func (r *telemetryRepository) queryFluxGeneric(ctx context.Context, fluxQuery st
 		params.Set("org", r.influx.org)
 
 		reqURL := r.influx.url + "/api/v2/query?" + params.Encode()
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewBufferString(fluxQuery))
+		req, err := http.NewRequest(http.MethodPost, reqURL, bytes.NewBufferString(fluxQuery))
 		if err != nil {
 			return err
 		}

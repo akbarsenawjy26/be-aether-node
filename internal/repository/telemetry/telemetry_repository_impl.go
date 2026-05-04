@@ -628,6 +628,14 @@ func (r *telemetryRepository) buildHistoryQuery(filter domainTelemetry.HistoryFi
 		aggregation = fmt.Sprintf(`|> aggregateWindow(every: %s, fn: mean, createEmpty: false)`, filter.Window)
 	}
 
+	// Apply limit if specified
+	limitClause := ""
+	if filter.Limit > 0 {
+		limitClause = fmt.Sprintf(`|> limit(n: %d)`, filter.Limit)
+	}
+
+	// For history, we want all data points with timestamps
+	// Sort by time and optionally limit
 	return fmt.Sprintf(`
 from(bucket: "%s")
     |> range(start: %s, stop: %s)
@@ -635,16 +643,17 @@ from(bucket: "%s")
     |> filter(fn: (r) => r["device_sn"] == "%s")
     %s
     %s
-    |> group(columns: ["_time", "device_sn", "_field"])
-    |> last()
-    |> sort(columns: ["_time"], desc: false)
+    |> sort(columns: ["_time"], desc: %t)
+    %s
 `,
 		r.influx.bucket,
 		filter.TimeRange.Start.UTC().Format(time.RFC3339),
 		filter.TimeRange.Stop.UTC().Format(time.RFC3339),
 		filter.DeviceSN,
 		projectFilter,
-		aggregation)
+		aggregation,
+		filter.SortDesc,
+		limitClause)
 }
 
 func (r *telemetryRepository) parseTelemetryHistory(result influxQueryResult) ([]domainTelemetry.TelemetryRecord, error) {
@@ -662,12 +671,18 @@ func (r *telemetryRepository) parseTelemetryHistory(result influxQueryResult) ([
 			colIdx[col] = i
 		}
 
+		// Check if this series has timestamp column
+		tsIdx, hasTimestamp := colIdx["timestamp"]
+
 		for _, row := range series.Values {
-			// Get _time
+			// Get timestamp
 			timestamp := time.Time{}
-			if i, ok := colIdx["_time"]; ok && i < len(row) {
-				if ts, ok := row[i].(string); ok {
-					if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			if hasTimestamp && tsIdx < len(row) {
+				if ts, ok := row[tsIdx].(string); ok {
+					// Try RFC3339Nano first, then RFC3339
+					if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+						timestamp = t
+					} else if t, err := time.Parse(time.RFC3339, ts); err == nil {
 						timestamp = t
 					}
 				}
@@ -867,12 +882,17 @@ func parseFluxCSV(csvData string) (influxQueryResult, error) {
 			}
 
 			// Extract column names (all columns except internal _ columns and result/table)
+			// BUT include _time as "timestamp" for history queries
 			columns := []string{}
 			for i, col := range header {
-				if i == 0 || col == "result" || col == "table" || col == "_start" || col == "_stop" || col == "_time" {
+				if i == 0 || col == "result" || col == "table" || col == "_start" || col == "_stop" {
 					continue
 				}
-				columns = append(columns, col)
+				if col == "_time" {
+					columns = append(columns, "timestamp") // rename _time to timestamp
+				} else {
+					columns = append(columns, col)
+				}
 			}
 
 			result.Series = append(result.Series, struct {
@@ -891,7 +911,7 @@ func parseFluxCSV(csvData string) (influxQueryResult, error) {
 		// Extract values for this row
 		values := []interface{}{}
 		for i, col := range header {
-			if i == 0 || col == "result" || col == "table" || col == "_start" || col == "_stop" || col == "_time" {
+			if i == 0 || col == "result" || col == "table" || col == "_start" || col == "_stop" {
 				continue
 			}
 			if i < len(row) {

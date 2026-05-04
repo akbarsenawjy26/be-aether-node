@@ -164,6 +164,10 @@ type historyRequest struct {
 	Start string `json:"start"` // RFC3339 format, e.g., "2024-01-01T00:00:00Z"
 	Stop  string `json:"stop"`  // RFC3339 format
 	Window string `json:"window"` // optional: "1m", "5m", "1h"
+	Order string `json:"order"` // "desc" or "asc" (default desc)
+	Sort  string `json:"sort"`  // field to sort by (default "timestamp")
+	Page  int    `json:"page"`  // page number (default 1)
+	Limit int    `json:"limit"` // items per page (default 100, max 1000)
 }
 
 // historyResponse represents the response for history endpoint
@@ -205,15 +209,33 @@ func (h *TelemetryHandler) GetTelemetryHistory(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "'stop' must be after 'start'")
 	}
 
+	// Set defaults for pagination and sorting
+	if req.Order == "" {
+		req.Order = "desc"
+	}
+	if req.Sort == "" {
+		req.Sort = "timestamp"
+	}
+	if req.Page < 1 {
+		req.Page = 1
+	}
+	if req.Limit < 1 || req.Limit > 1000 {
+		req.Limit = 100
+	}
+
+	sortDesc := req.Order == "desc"
+
 	// Query history
 	filter := telemetry.HistoryFilter{
-		Project: project,
+		Project:  project,
 		DeviceSN: deviceSN,
 		TimeRange: telemetry.QueryTimeRange{
 			Start: start.UTC(),
 			Stop:  stop.UTC(),
 		},
-		Window: req.Window,
+		Window:   req.Window,
+		SortDesc: sortDesc,
+		Limit:    req.Limit,
 	}
 
 	records, err := h.svc.GetTelemetryHistory(c.Request().Context(), filter)

@@ -51,3 +51,5 @@ logs/
 
 # Hermes Agent
 .hermes/
+server
+server

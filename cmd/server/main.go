@@ -151,6 +151,7 @@ func main() {
 	}))
 
 	// User routes
+	api.GET("/user/me", userHandler.GetMe)
 	api.POST("/user", userHandler.CreateUser)
 	api.GET("/user/:guid", userHandler.GetUser)
 	api.POST("/user/list", userHandler.ListUsers)

@@ -6,6 +6,7 @@ import (
 	"aether-node/internal/domain/user"
 	"aether-node/pkg/response"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 )
 
@@ -48,6 +49,25 @@ func (h *UserHandler) CreateUser(c echo.Context) error {
 	}
 
 	return response.Success(c, http.StatusCreated, u, "User created successfully")
+}
+
+// GetMe handles GET /user/me
+func (h *UserHandler) GetMe(c echo.Context) error {
+	ctx := c.Request().Context()
+
+	// Extract user GUID from JWT subject claim
+	token := c.Get("user").(*jwt.Token)
+	guid := token.Claims.(jwt.RegisteredClaims).Subject
+
+	u, err := h.svc.GetUser(ctx, guid)
+	if err != nil {
+		if err == user.ErrUserNotFound {
+			return response.Error(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "User not found")
+		}
+		return response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+	}
+
+	return response.Success(c, http.StatusOK, u, "User retrieved successfully")
 }
 
 // GetUser handles GET /user/:guid

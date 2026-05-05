@@ -161,13 +161,14 @@ func (h *TelemetryHandler) sendDevice(c echo.Context, project, deviceSN string) 
 
 // historyRequest represents the request body for history endpoint
 type historyRequest struct {
-	Start string `json:"start"` // RFC3339 format, e.g., "2024-01-01T00:00:00Z"
-	Stop  string `json:"stop"`  // RFC3339 format
+	Start  string `json:"start"`  // RFC3339 format, e.g., "2024-01-01T00:00:00Z"
+	Stop   string `json:"stop"`   // RFC3339 format
 	Window string `json:"window"` // optional: "1m", "5m", "1h"
-	Order string `json:"order"` // "desc" or "asc" (default desc)
-	Sort  string `json:"sort"`  // field to sort by (default "timestamp")
-	Page  int    `json:"page"`  // page number (default 1)
-	Limit int    `json:"limit"` // items per page (default 100, max 1000)
+	Order  string `json:"order"`  // "desc" or "asc" (default desc)
+	Sort   string `json:"sort"`   // field to sort by (default "timestamp")
+	Page   int    `json:"page"`   // page number (default 1)
+	Limit  int    `json:"limit"`  // items per page (default 20, max 100)
+	Offset int    `json:"offset"` // offset for pagination (default 0)
 }
 
 // historyResponse represents the response for history endpoint
@@ -219,13 +220,16 @@ func (h *TelemetryHandler) GetTelemetryHistory(c echo.Context) error {
 	if req.Page < 1 {
 		req.Page = 1
 	}
-	if req.Limit < 1 || req.Limit > 1000 {
-		req.Limit = 100
+	if req.Limit < 1 || req.Limit > 100 {
+		req.Limit = 20
 	}
+
+	// Calculate offset from page
+	offset := (req.Page - 1) * req.Limit
 
 	sortDesc := req.Order == "desc"
 
-	// Query history
+	// Query history — request limit+1 to detect has_more
 	filter := telemetry.HistoryFilter{
 		Project:  project,
 		DeviceSN: deviceSN,
@@ -236,6 +240,7 @@ func (h *TelemetryHandler) GetTelemetryHistory(c echo.Context) error {
 		Window:   req.Window,
 		SortDesc: sortDesc,
 		Limit:    req.Limit,
+		Offset:   offset,
 	}
 
 	records, err := h.svc.GetTelemetryHistory(c.Request().Context(), filter)
@@ -247,9 +252,17 @@ func (h *TelemetryHandler) GetTelemetryHistory(c echo.Context) error {
 		records = []telemetry.TelemetryRecord{}
 	}
 
-	return c.JSON(http.StatusOK, historyResponse{
-		DeviceSN: deviceSN,
-		Data:     records,
+	// Determine has_more: if we got more records than requested, there are more
+	hasMore := len(records) > req.Limit
+	if hasMore {
+		records = records[:req.Limit]
+	}
+
+	return response.SuccessWithPagination(c, http.StatusOK, records, &response.Pagination{
+		Page:    req.Page,
+		Limit:   req.Limit,
+		Total:   0, // not available for time-series queries
+		HasMore: hasMore,
 	})
 }
 

@@ -21,6 +21,7 @@ type Pagination struct {
 	Limit      int   `json:"limit"`
 	Total      int64 `json:"total"`
 	TotalPages int   `json:"total_pages"`
+	HasMore    bool  `json:"has_more"`
 }
 
 type PaginatedResponse struct {

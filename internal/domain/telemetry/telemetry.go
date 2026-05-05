@@ -99,6 +99,7 @@ type HistoryFilter struct {
 	Window   string // "1m", "5m", "1h" — kosong = raw data
 	SortDesc bool   // sort by time descending (default true)
 	Limit    int    // max records to return (0 = no limit)
+	Offset   int    // offset for pagination (default 0)
 }
 
 // ============================================================

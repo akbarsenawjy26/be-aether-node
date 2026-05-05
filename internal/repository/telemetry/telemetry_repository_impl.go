@@ -628,11 +628,14 @@ func (r *telemetryRepository) buildHistoryQuery(filter domainTelemetry.HistoryFi
 		aggregation = fmt.Sprintf(`|> aggregateWindow(every: %s, fn: mean, createEmpty: false)`, filter.Window)
 	}
 
-	// Apply limit if specified
-	limitClause := ""
-	if filter.Limit > 0 {
-		limitClause = fmt.Sprintf(`|> limit(n: %d)`, filter.Limit)
+	// Apply limit + 1 for has_more detection
+	fetchLimit := filter.Limit
+	if fetchLimit > 0 {
+		fetchLimit = filter.Limit + 1
 	}
+
+	// InfluxDB limit supports offset: |> limit(n: 20, offset: 0)
+	limitClause := fmt.Sprintf(`|> limit(n: %d, offset: %d)`, fetchLimit, filter.Offset)
 
 	// For history, we want all data points with timestamps
 	// Sort by time and optionally limit

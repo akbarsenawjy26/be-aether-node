@@ -6,7 +6,7 @@ import (
 	"aether-node/internal/domain/user"
 	"aether-node/pkg/response"
 
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/golang-jwt/jwt"
 	"github.com/labstack/echo/v4"
 )
 
@@ -55,9 +55,10 @@ func (h *UserHandler) CreateUser(c echo.Context) error {
 func (h *UserHandler) GetMe(c echo.Context) error {
 	ctx := c.Request().Context()
 
-	// Extract user GUID from JWT subject claim
+	// Echo v4 JWT middleware stores *jwt.Token (from github.com/golang-jwt/jwt, NOT jwt/v5)
+	// Extract sub claim to get user GUID
 	token := c.Get("user").(*jwt.Token)
-	guid := token.Claims.(jwt.RegisteredClaims).Subject
+	guid := token.Claims.(jwt.MapClaims)["sub"].(string)
 
 	u, err := h.svc.GetUser(ctx, guid)
 	if err != nil {

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	domainTelemetry "aether-node/internal/domain/telemetry"
 	"aether-node/internal/circuitbreaker"
+	domainTelemetry "aether-node/internal/domain/telemetry"
 	"aether-node/internal/metrics"
 )
 
@@ -382,7 +382,7 @@ func (r *telemetryRepository) buildHealthQuery(filter domainTelemetry.DeviceFilt
 
 	return fmt.Sprintf(`
 from(bucket: "%s")
-    |> range(start: -1m)
+    |> range(start: 0)
     |> filter(fn: (r) => r["_measurement"] == "health")
     %s
     %s
@@ -463,10 +463,16 @@ func (r *telemetryRepository) parseHealthResult(result influxQueryResult) ([]dom
 				dev.ResetReason = toString(fieldValue)
 			}
 
-			// Get last_seen from _time
-			if i, ok := colIdx["_time"]; ok && i < len(row) {
+			// Get last_seen from timestamp (renamed from _time in parseFluxCSV)
+			if i, ok := colIdx["timestamp"]; ok && i < len(row) {
 				if ts, ok := row[i].(string); ok {
-					if t, err := time.Parse(time.RFC3339, ts); err == nil {
+					// Try RFC3339Nano first, then fallback to RFC3339
+					t, err := time.Parse(time.RFC3339Nano, ts)
+					if err != nil {
+						t, err = time.Parse(time.RFC3339, ts)
+					}
+					
+					if err == nil {
 						if t.After(dev.LastSeen) {
 							dev.LastSeen = t
 						}
@@ -481,10 +487,10 @@ func (r *telemetryRepository) parseHealthResult(result influxQueryResult) ([]dom
 	now := time.Now()
 	for _, dev := range deviceMap {
 		// Set status based on last_seen
+		// If last_seen is zero, it's definitely offline
 		if dev.LastSeen.IsZero() {
-			dev.LastSeen = now
-		}
-		if now.Sub(dev.LastSeen) > offlineThreshold {
+			dev.Status = "offline"
+		} else if now.Sub(dev.LastSeen) > offlineThreshold {
 			dev.Status = "offline"
 		} else {
 			dev.Status = "online"
@@ -545,7 +551,7 @@ func (r *telemetryRepository) buildLatestTelemetryQuery(filter domainTelemetry.D
 
 	return fmt.Sprintf(`
 from(bucket: "%s")
-    |> range(start: -1m)
+    |> range(start: -24h)
     |> filter(fn: (r) => r["_measurement"] == "telemetry")
     %s
     %s

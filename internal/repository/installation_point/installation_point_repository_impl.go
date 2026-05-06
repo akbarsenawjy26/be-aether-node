@@ -74,11 +74,6 @@ func (r *installationPointRepository) List(ctx context.Context, params domainIP.
 		params.Page = 1
 	}
 
-	var search string
-	if params.Search != "" {
-		search = "%" + params.Search + "%"
-	}
-
 	var deviceGUID pgtype.UUID
 	if params.DeviceGUID != "" {
 		id, _ := uuid.Parse(params.DeviceGUID)
@@ -92,13 +87,13 @@ func (r *installationPointRepository) List(ctx context.Context, params domainIP.
 	}
 
 	offset := (params.Page - 1) * params.Limit
-
+	
 	dbIPs, err := r.db.ListInstallationPoints(ctx, db.ListInstallationPointsParams{
-		Column1: search,
-		Column2: deviceGUID,
-		Column3: locationGUID,
-		Limit:   int32(params.Limit),
-		Offset:  int32(offset),
+		Limit:        int32(params.Limit),
+		Offset:       int32(offset),
+		Search:       db.NewText(params.Search),
+		DeviceGuid:   deviceGUID,
+		LocationGuid: locationGUID,
 	})
 	if err != nil {
 		return nil, err
@@ -110,8 +105,41 @@ func (r *installationPointRepository) List(ctx context.Context, params domainIP.
 	}
 
 	ips := make([]*domainIP.InstallationPoint, 0, len(dbIPs))
-	for i := range dbIPs {
-		ips = append(ips, db.InstallationPointFromDB(&dbIPs[i]))
+	for _, row := range dbIPs {
+		ip := &domainIP.InstallationPoint{
+			Name: row.Name,
+		}
+		if row.Guid.Valid {
+			ip.GUID = uuid.UUID(row.Guid.Bytes).String()
+		}
+		if row.DeviceGuid.Valid {
+			ip.DeviceGUID = uuid.UUID(row.DeviceGuid.Bytes).String()
+		}
+		if row.LocationGuid.Valid {
+			ip.LocationGUID = uuid.UUID(row.LocationGuid.Bytes).String()
+		}
+		if row.Notes.Valid {
+			ip.Notes = row.Notes.String
+		}
+		if row.CreatedAt.Valid {
+			ip.CreatedAt = row.CreatedAt.Time
+		}
+		if row.UpdatedAt.Valid {
+			ip.UpdatedAt = row.UpdatedAt.Time
+		}
+		if row.DeletedAt.Valid {
+			ip.DeletedAt = &row.DeletedAt.Time
+		}
+		if row.SerialNumber.Valid {
+			ip.DeviceSN = row.SerialNumber.String
+		}
+		if row.Alias.Valid {
+			ip.DeviceAlias = row.Alias.String
+		}
+		if row.LocationName.Valid {
+			ip.LocationName = row.LocationName.String
+		}
+		ips = append(ips, ip)
 	}
 
 	totalPages := int(total) / params.Limit

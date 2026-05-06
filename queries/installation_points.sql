@@ -8,14 +8,18 @@ FROM installation_points
 WHERE guid = $1 AND deleted_at IS NULL;
 
 -- name: ListInstallationPoints :many
-SELECT ip.guid, ip.name, ip.device_guid, ip.location_guid, ip.notes, ip.created_at, ip.updated_at, ip.deleted_at
+SELECT 
+    ip.guid, ip.name, ip.device_guid, ip.location_guid, ip.notes, ip.created_at, ip.updated_at, ip.deleted_at,
+    d.serial_number, d.alias, l.name as location_name
 FROM installation_points ip
+LEFT JOIN devices d ON ip.device_guid = d.guid
+LEFT JOIN locations l ON ip.location_guid = l.guid
 WHERE ip.deleted_at IS NULL
-  AND ($1::text IS NULL OR ip.name ILIKE $1 OR ip.notes ILIKE $1)
-  AND ($2::uuid IS NULL OR ip.device_guid = $2)
-  AND ($3::uuid IS NULL OR ip.location_guid = $3)
+  AND (CAST(sqlc.narg('search') AS text) IS NULL OR sqlc.narg('search') = '' OR ip.name ILIKE '%' || CAST(sqlc.narg('search') AS text) || '%' OR ip.notes ILIKE '%' || CAST(sqlc.narg('search') AS text) || '%')
+  AND (CAST(sqlc.narg('device_guid') AS uuid) IS NULL OR ip.device_guid = sqlc.narg('device_guid'))
+  AND (CAST(sqlc.narg('location_guid') AS uuid) IS NULL OR ip.location_guid = sqlc.narg('location_guid'))
 ORDER BY ip.created_at DESC
-LIMIT $4 OFFSET $5;
+LIMIT $1 OFFSET $2;
 
 -- name: CountInstallationPoints :one
 SELECT COUNT(*) FROM installation_points WHERE deleted_at IS NULL;

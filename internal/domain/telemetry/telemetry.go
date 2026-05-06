@@ -47,6 +47,7 @@ type TelemetryListResult struct {
 // HealthData — data kesehatan device dari InfluxDB measurement "health"
 type HealthData struct {
 	DeviceSN    string    `json:"device_sn"`
+	DeviceName  string    `json:"device_name,omitempty"`
 	GatewaySN   string    `json:"gateway_sn"`
 	Project     string    `json:"project"`
 	Type        string    `json:"type"`
@@ -142,4 +143,7 @@ type TelemetryService interface {
 	StreamAllDevicesWithHealth(ctx context.Context, project string) (DevicePayload, error)
 	StreamDeviceWithHealth(ctx context.Context, project, deviceSN string) (*DeviceEntry, error)
 	GetTelemetryHistory(ctx context.Context, filter HistoryFilter) ([]TelemetryRecord, error)
+
+	// Cache management
+	InvalidateDeviceCache()
 }

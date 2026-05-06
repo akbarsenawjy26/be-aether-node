@@ -5,23 +5,32 @@ import (
 	"sync"
 	"time"
 
+	domainDevice "aether-node/internal/domain/device"
 	domainTelemetry "aether-node/internal/domain/telemetry"
 )
 
 type telemetryService struct {
-	repo domainTelemetry.TelemetryRepository
+	repo       domainTelemetry.TelemetryRepository
+	deviceRepo domainDevice.DeviceRepository
 
 	// For SSE streaming
 	subscribers map[string]chan *domainTelemetry.Telemetry
 	allDevices  chan *domainTelemetry.Telemetry
 	mu          sync.RWMutex
+
+	// In-memory cache for device names (SN -> Alias)
+	nameCache       map[string]string
+	cacheMu         sync.RWMutex
+	lastCacheUpdate time.Time
 }
 
-func NewTelemetryService(repo domainTelemetry.TelemetryRepository) domainTelemetry.TelemetryService {
+func NewTelemetryService(repo domainTelemetry.TelemetryRepository, deviceRepo domainDevice.DeviceRepository) domainTelemetry.TelemetryService {
 	svc := &telemetryService{
 		repo:        repo,
+		deviceRepo:  deviceRepo,
 		subscribers: make(map[string]chan *domainTelemetry.Telemetry),
 		allDevices:  make(chan *domainTelemetry.Telemetry, 100),
+		nameCache:   make(map[string]string),
 	}
 
 	// Start the SSE publisher goroutine
@@ -129,10 +138,50 @@ func (s *telemetryService) GetHistory(ctx context.Context, deviceSN string, quer
 // Pattern dari DEVICE_STREAM_GUIDE.md Section 8
 // ============================================================
 
+func (s *telemetryService) getNameMap(ctx context.Context) map[string]string {
+	s.cacheMu.RLock()
+	// Refresh if cache is empty or older than 5 minutes
+	if len(s.nameCache) > 0 && time.Since(s.lastCacheUpdate) < 5*time.Minute {
+		defer s.cacheMu.RUnlock()
+		// Return a copy to avoid race conditions if needed, but since we only replace the map, a reference is fine for RLock
+		return s.nameCache
+	}
+	s.cacheMu.RUnlock()
+
+	// Need update
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	// Double check after lock
+	if len(s.nameCache) > 0 && time.Since(s.lastCacheUpdate) < 5*time.Minute {
+		return s.nameCache
+	}
+
+	devices, err := s.deviceRepo.List(ctx, domainDevice.ListParams{Limit: 1000})
+	if err == nil && devices != nil {
+		newMap := make(map[string]string)
+		for _, d := range devices.Devices {
+			newMap[d.SerialNumber] = d.Alias
+		}
+		s.nameCache = newMap
+		s.lastCacheUpdate = time.Now()
+	}
+	return s.nameCache
+}
+
+func (s *telemetryService) InvalidateDeviceCache() {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.nameCache = make(map[string]string)
+	s.lastCacheUpdate = time.Time{} // Reset to zero time
+}
+
 func (s *telemetryService) StreamAllDevicesWithHealth(ctx context.Context, project string) (domainTelemetry.DevicePayload, error) {
 	filter := domainTelemetry.DeviceFilter{Project: project}
 
-	// Query health dan telemetry secara terpisah (use SSE bypass methods to avoid circuit breaker)
+	// 1. Get ALL devices from memory cache / Postgres (Master list)
+
+	// 2. Query health and telemetry from InfluxDB
 	healthList, err := s.repo.GetLatestHealthSSE(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -143,15 +192,54 @@ func (s *telemetryService) StreamAllDevicesWithHealth(ctx context.Context, proje
 		return nil, err
 	}
 
-	// Merge: health + telemetry → group by device type
-	payload := make(domainTelemetry.DevicePayload)
+	// 3. Merge data, using PostgreSQL as the base
+	// (Previously we only iterated over healthList from Influx)
+	
+	// Pre-map health for easy lookup
+	healthMap := make(map[string]domainTelemetry.HealthData)
 	for _, h := range healthList {
-		t := telemetryMap[h.DeviceSN]
+		healthMap[h.DeviceSN] = h
+	}
+
+	payload := make(domainTelemetry.DevicePayload)
+	
+	// Get full device objects from DB to get their Type
+	devices, err := s.deviceRepo.List(ctx, domainDevice.ListParams{Limit: 1000})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, dev := range devices.Devices {
+		// Filter by project if requested
+		// Note: we might need project field in device model if we want strict filtering
+		
+		sn := dev.SerialNumber
+		typeName := dev.Type
+		if typeName == "" {
+			typeName = "unknown"
+		}
+
+		// Get health from Influx or create default "offline" health
+		health, ok := healthMap[sn]
+		if !ok {
+			health = domainTelemetry.HealthData{
+				DeviceSN:   sn,
+				DeviceName: dev.Alias,
+				Type:       typeName,
+				Status:     "offline",
+			}
+		} else {
+			health.DeviceName = dev.Alias
+		}
+
+		// Get telemetry from Influx
+		t := telemetryMap[sn]
 		if t == nil {
 			t = make(domainTelemetry.TelemetryData)
 		}
-		payload[h.Type] = append(payload[h.Type], domainTelemetry.DeviceEntry{
-			Health:    h,
+
+		payload[typeName] = append(payload[typeName], domainTelemetry.DeviceEntry{
+			Health:    health,
 			Telemetry: t,
 		})
 	}
@@ -186,8 +274,15 @@ func (s *telemetryService) StreamDeviceWithHealth(ctx context.Context, project, 
 		t = make(domainTelemetry.TelemetryData)
 	}
 
+	health := healthList[0]
+	// Fetch name from Postgres
+	device, err := s.deviceRepo.GetBySerialNumber(ctx, deviceSN)
+	if err == nil && device != nil {
+		health.DeviceName = device.Alias
+	}
+
 	return &domainTelemetry.DeviceEntry{
-		Health:    healthList[0],
+		Health:    health,
 		Telemetry: t,
 	}, nil
 }

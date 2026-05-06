@@ -19,6 +19,9 @@ type InstallationPoint struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+	DeviceSN     string     `json:"device_sn,omitempty"`
+	DeviceAlias  string     `json:"device_alias,omitempty"`
+	LocationName string     `json:"location_name,omitempty"`
 }
 
 type InstallationPointWithRelations struct {

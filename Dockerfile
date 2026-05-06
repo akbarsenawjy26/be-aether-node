@@ -26,7 +26,7 @@ FROM alpine:3.19
 WORKDIR /app
 
 # Install CA certificates for HTTPS
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata curl
 
 # Create non-root user
 RUN addgroup -g 1001 -S appgroup && \

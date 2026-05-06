@@ -69,6 +69,10 @@ func (m *MockTelemetryService) GetTelemetryHistory(ctx context.Context, filter t
 	return args.Get(0).([]telemetry.TelemetryRecord), args.Error(1)
 }
 
+func (m *MockTelemetryService) InvalidateDeviceCache() {
+	m.Called()
+}
+
 // ============================================================
 // Handler Tests
 // ============================================================

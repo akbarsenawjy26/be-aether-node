@@ -86,7 +86,8 @@ func main() {
 
 	// Initialize services
 	userSvc := userSvc.NewUserService(userRepo)
-	deviceSvc := deviceSvc.NewDeviceService(deviceRepo)
+	telemetrySvc := telemetrySvc.NewTelemetryService(telemetryRepo, deviceRepo)
+	deviceSvc := deviceSvc.NewDeviceService(deviceRepo, telemetrySvc.InvalidateDeviceCache)
 	locationSvc := locationSvc.NewLocationService(locationRepo)
 	installationPointSvc := installationPointSvc.NewInstallationPointService(installationPointRepo)
 	apiKeySvc := apikeySvc.NewAPIKeyService(apiKeyRepo, "aeth_live_pk_")
@@ -99,7 +100,6 @@ func main() {
 		cfg.JWT.AccessExpiry(),
 		cfg.JWT.RefreshExpiry(),
 	)
-	telemetrySvc := telemetrySvc.NewTelemetryService(telemetryRepo)
 
 	// Initialize handlers
 	userHandler := handler.NewUserHandler(userSvc)

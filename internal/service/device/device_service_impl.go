@@ -7,11 +7,15 @@ import (
 )
 
 type deviceService struct {
-	repo domainDevice.DeviceRepository
+	repo     domainDevice.DeviceRepository
+	onUpdate func() // Callback to invalidate external caches
 }
 
-func NewDeviceService(repo domainDevice.DeviceRepository) domainDevice.DeviceService {
-	return &deviceService{repo: repo}
+func NewDeviceService(repo domainDevice.DeviceRepository, onUpdate func()) domainDevice.DeviceService {
+	return &deviceService{
+		repo:     repo,
+		onUpdate: onUpdate,
+	}
 }
 
 func (s *deviceService) CreateDevice(ctx context.Context, req *domainDevice.CreateDeviceRequest) (*domainDevice.Device, error) {
@@ -33,6 +37,10 @@ func (s *deviceService) CreateDevice(ctx context.Context, req *domainDevice.Crea
 
 	if err := s.repo.Create(ctx, device); err != nil {
 		return nil, err
+	}
+
+	if s.onUpdate != nil {
+		s.onUpdate()
 	}
 
 	return device, nil
@@ -87,9 +95,21 @@ func (s *deviceService) UpdateDevice(ctx context.Context, guid string, req *doma
 		return nil, err
 	}
 
+	if s.onUpdate != nil {
+		s.onUpdate()
+	}
+
 	return device, nil
 }
 
 func (s *deviceService) DeleteDevice(ctx context.Context, guid string) error {
-	return s.repo.Delete(ctx, guid)
+	if err := s.repo.Delete(ctx, guid); err != nil {
+		return err
+	}
+
+	if s.onUpdate != nil {
+		s.onUpdate()
+	}
+
+	return nil
 }

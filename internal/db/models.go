@@ -5,8 +5,114 @@
 package db
 
 import (
+	"database/sql/driver"
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type AlarmSeverity string
+
+const (
+	AlarmSeverityInfo     AlarmSeverity = "info"
+	AlarmSeverityWarning  AlarmSeverity = "warning"
+	AlarmSeverityCritical AlarmSeverity = "critical"
+)
+
+func (e *AlarmSeverity) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AlarmSeverity(s)
+	case string:
+		*e = AlarmSeverity(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AlarmSeverity: %T", src)
+	}
+	return nil
+}
+
+type NullAlarmSeverity struct {
+	AlarmSeverity AlarmSeverity `json:"alarm_severity"`
+	Valid         bool          `json:"valid"` // Valid is true if AlarmSeverity is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAlarmSeverity) Scan(value interface{}) error {
+	if value == nil {
+		ns.AlarmSeverity, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AlarmSeverity.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAlarmSeverity) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AlarmSeverity), nil
+}
+
+type AlarmStatus string
+
+const (
+	AlarmStatusActive       AlarmStatus = "active"
+	AlarmStatusAcknowledged AlarmStatus = "acknowledged"
+	AlarmStatusResolved     AlarmStatus = "resolved"
+)
+
+func (e *AlarmStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AlarmStatus(s)
+	case string:
+		*e = AlarmStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AlarmStatus: %T", src)
+	}
+	return nil
+}
+
+type NullAlarmStatus struct {
+	AlarmStatus AlarmStatus `json:"alarm_status"`
+	Valid       bool        `json:"valid"` // Valid is true if AlarmStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAlarmStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.AlarmStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AlarmStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAlarmStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AlarmStatus), nil
+}
+
+type Alarm struct {
+	Guid           pgtype.UUID        `json:"guid"`
+	DeviceGuid     pgtype.UUID        `json:"device_guid"`
+	ThresholdGuid  pgtype.UUID        `json:"threshold_guid"`
+	ParameterName  string             `json:"parameter_name"`
+	TriggeredValue float64            `json:"triggered_value"`
+	Status         AlarmStatus        `json:"status"`
+	Severity       AlarmSeverity      `json:"severity"`
+	TriggeredAt    pgtype.Timestamptz `json:"triggered_at"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	AcknowledgedAt pgtype.Timestamptz `json:"acknowledged_at"`
+	AcknowledgedBy pgtype.UUID        `json:"acknowledged_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+}
 
 type Apikey struct {
 	Guid       pgtype.UUID        `json:"guid"`
@@ -57,6 +163,19 @@ type RefreshToken struct {
 	TokenHash string             `json:"token_hash"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type Threshold struct {
+	Guid          pgtype.UUID        `json:"guid"`
+	DeviceGuid    pgtype.UUID        `json:"device_guid"`
+	ParameterName string             `json:"parameter_name"`
+	MinValue      pgtype.Float8      `json:"min_value"`
+	MaxValue      pgtype.Float8      `json:"max_value"`
+	Severity      AlarmSeverity      `json:"severity"`
+	IsActive      bool               `json:"is_active"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type User struct {

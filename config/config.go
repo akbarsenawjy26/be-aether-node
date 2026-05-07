@@ -14,6 +14,7 @@ type Config struct {
 	InfluxDB InfluxDBConfig
 	JWT      JWTConfig
 	Server   ServerConfig
+	NATS     NATSConfig
 }
 
 // Load reads all configuration from environment variables.
@@ -30,6 +31,7 @@ func Load() (*Config, error) {
 	cfg.InfluxDB.Load()
 	cfg.JWT.Load()
 	cfg.Server.Load()
+	cfg.NATS.Load()
 
 	// Validate required fields
 	if cfg.JWT.Secret == "" {

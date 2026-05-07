@@ -6,11 +6,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"aether-node/internal/domain/alarm"
 	"aether-node/internal/domain/apikey"
 	"aether-node/internal/domain/auth"
 	"aether-node/internal/domain/device"
 	"aether-node/internal/domain/installation_point"
 	"aether-node/internal/domain/location"
+	"aether-node/internal/domain/threshold"
 	"aether-node/internal/domain/user"
 )
 
@@ -193,6 +195,88 @@ func RefreshTokenFromDB(in *RefreshToken) *auth.RefreshToken {
 	return out
 }
 
+// ─── Threshold ───────────────────────────────────────────────────────────────
+
+func ThresholdFromDB(in *Threshold) *threshold.Threshold {
+	if in == nil {
+		return nil
+	}
+	out := &threshold.Threshold{
+		ParameterName: in.ParameterName,
+		Severity:      string(in.Severity),
+		IsActive:      in.IsActive,
+	}
+	if in.Guid.Valid {
+		out.GUID = uuid.UUID(in.Guid.Bytes).String()
+	}
+	if in.DeviceGuid.Valid {
+		out.DeviceGUID = uuid.UUID(in.DeviceGuid.Bytes).String()
+	}
+	if in.MinValue.Valid {
+		out.MinValue = &in.MinValue.Float64
+	}
+	if in.MaxValue.Valid {
+		out.MaxValue = &in.MaxValue.Float64
+	}
+	if in.CreatedAt.Valid {
+		out.CreatedAt = in.CreatedAt.Time
+	}
+	if in.UpdatedAt.Valid {
+		out.UpdatedAt = in.UpdatedAt.Time
+	}
+	if in.DeletedAt.Valid {
+		out.DeletedAt = &in.DeletedAt.Time
+	}
+	return out
+}
+
+// ─── Alarm ───────────────────────────────────────────────────────────────────
+
+func AlarmFromDB(in *Alarm) *alarm.Alarm {
+	if in == nil {
+		return nil
+	}
+	out := &alarm.Alarm{
+		ParameterName:  in.ParameterName,
+		TriggeredValue: in.TriggeredValue,
+		Status:         string(in.Status),
+		Severity:       string(in.Severity),
+	}
+	if in.Guid.Valid {
+		out.GUID = uuid.UUID(in.Guid.Bytes).String()
+	}
+	if in.DeviceGuid.Valid {
+		out.DeviceGUID = uuid.UUID(in.DeviceGuid.Bytes).String()
+	}
+	if in.ThresholdGuid.Valid {
+		s := uuid.UUID(in.ThresholdGuid.Bytes).String()
+		out.ThresholdGUID = &s
+	}
+	if in.TriggeredAt.Valid {
+		out.TriggeredAt = in.TriggeredAt.Time
+	}
+	if in.ResolvedAt.Valid {
+		out.ResolvedAt = &in.ResolvedAt.Time
+	}
+	if in.AcknowledgedAt.Valid {
+		out.AcknowledgedAt = &in.AcknowledgedAt.Time
+	}
+	if in.AcknowledgedBy.Valid {
+		s := uuid.UUID(in.AcknowledgedBy.Bytes).String()
+		out.AcknowledgedBy = &s
+	}
+	if in.CreatedAt.Valid {
+		out.CreatedAt = in.CreatedAt.Time
+	}
+	if in.UpdatedAt.Valid {
+		out.UpdatedAt = in.UpdatedAt.Time
+	}
+	if in.DeletedAt.Valid {
+		out.DeletedAt = &in.DeletedAt.Time
+	}
+	return out
+}
+
 // ─── Constructor helpers ─────────────────────────────────────────────────────
 
 func NewUUID(id uuid.UUID) pgtype.UUID {
@@ -209,4 +293,11 @@ func NewTimestamptz(t time.Time) pgtype.Timestamptz {
 
 func NewText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
+}
+
+func NewFloat8(f *float64) pgtype.Float8 {
+	if f == nil {
+		return pgtype.Float8{Valid: false}
+	}
+	return pgtype.Float8{Float64: *f, Valid: true}
 }

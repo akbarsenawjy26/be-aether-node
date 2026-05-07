@@ -16,20 +16,24 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	alarmRepo "aether-node/internal/repository/alarm"
 	apikeyRepo "aether-node/internal/repository/apikey"
 	authRepo "aether-node/internal/repository/auth"
 	deviceRepo "aether-node/internal/repository/device"
 	installationPointRepo "aether-node/internal/repository/installation_point"
 	locationRepo "aether-node/internal/repository/location"
 	telemetryRepo "aether-node/internal/repository/telemetry"
+	thresholdRepo "aether-node/internal/repository/threshold"
 	userRepo "aether-node/internal/repository/user"
 
+	alarmSvc "aether-node/internal/service/alarm"
 	apikeySvc "aether-node/internal/service/apikey"
 	authSvc "aether-node/internal/service/auth"
 	deviceSvc "aether-node/internal/service/device"
 	installationPointSvc "aether-node/internal/service/installation_point"
 	locationSvc "aether-node/internal/service/location"
 	telemetrySvc "aether-node/internal/service/telemetry"
+	thresholdSvc "aether-node/internal/service/threshold"
 	userSvc "aether-node/internal/service/user"
 
 	"aether-node/internal/handler"
@@ -37,6 +41,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/nats-io/nats.go"
 )
 
 func main() {
@@ -68,6 +73,16 @@ func main() {
 	} else {
 		log.Info().Str("component", "influxdb").Msg("Connected to InfluxDB")
 	}
+	
+	// Connect to NATS
+	log.Info().Str("component", "nats").Str("url", cfg.NATS.URL).Msg("Connecting to NATS...")
+	nc, err := nats.Connect(cfg.NATS.URL)
+	if err != nil {
+		log.Warn().Err(err).Str("component", "nats").Str("url", cfg.NATS.URL).Msg("NATS connection failed (non-fatal)")
+	} else {
+		log.Info().Str("component", "nats").Str("url", cfg.NATS.URL).Msg("Connected to NATS")
+		defer nc.Close()
+	}
 
 	// Create db.Queries from pool for type-safe SQL operations
 	queries := db.New(pgPool)
@@ -83,6 +98,8 @@ func main() {
 		cfg.InfluxDB.URL, cfg.InfluxDB.Token,
 		cfg.InfluxDB.Org, cfg.InfluxDB.Bucket,
 	)
+	thresholdRepo := thresholdRepo.NewThresholdRepository(queries)
+	alarmRepo := alarmRepo.NewAlarmRepository(queries)
 
 	// Initialize services
 	userSvc := userSvc.NewUserService(userRepo)
@@ -100,6 +117,8 @@ func main() {
 		cfg.JWT.AccessExpiry(),
 		cfg.JWT.RefreshExpiry(),
 	)
+	thresholdSvc := thresholdSvc.NewThresholdService(thresholdRepo, nc)
+	alarmSvc := alarmSvc.NewAlarmService(alarmRepo)
 
 	// Initialize handlers
 	userHandler := handler.NewUserHandler(userSvc)
@@ -111,6 +130,8 @@ func main() {
 	telemetryHandler := handler.NewTelemetryHandler(telemetrySvc)
 	healthChecker := handler.NewHealthChecker(pgPool, cfg.InfluxDB.URL, cfg.InfluxDB.Token)
 	healthHandler := handler.NewHealthHandler(healthChecker)
+	thresholdHandler := handler.NewThresholdHandler(thresholdSvc)
+	alarmHandler := handler.NewAlarmHandler(alarmSvc)
 
 	// Setup Echo
 	e := echo.New()
@@ -147,6 +168,7 @@ func main() {
 	api := e.Group("")
 	api.Use(echomiddleware.JWTWithConfig(echomiddleware.JWTConfig{
 		SigningKey: []byte(cfg.JWT.Secret),
+		TokenLookup: "header:Authorization,query:token",
 		ErrorHandlerWithContext: middleware.JWTAuthErrorHandlerWithContext,
 	}))
 
@@ -190,6 +212,21 @@ func main() {
 	// Dashboard - SSE + History routes (via RegisterRoutes)
 	telemetryGroup := api.Group("/telemetry")
 	telemetryHandler.RegisterRoutes(telemetryGroup)
+
+	// Threshold routes
+	api.POST("/threshold", thresholdHandler.CreateThreshold)
+	api.GET("/threshold/:guid", thresholdHandler.GetThreshold)
+	api.GET("/threshold/device/:device_guid", thresholdHandler.ListThresholdsByDevice)
+	api.PATCH("/threshold/:guid", thresholdHandler.UpdateThreshold)
+	api.DELETE("/threshold/:guid", thresholdHandler.DeleteThreshold)
+
+	// Alarm routes
+	api.GET("/alarm/active/:device_guid", alarmHandler.GetActiveAlarms)
+	api.GET("/alarm/history", alarmHandler.GetAlarmHistory)
+	api.GET("/alarm/stats", alarmHandler.GetAlarmStats)
+	api.GET("/alarm/stream", alarmHandler.StreamAlarms)
+	api.POST("/alarm/:guid/acknowledge", alarmHandler.AcknowledgeAlarm)
+	api.POST("/alarm/:guid/resolve", alarmHandler.ResolveAlarm)
 
 	// Telemetry ingestion
 	e.POST("/telemetry", telemetryHandler.WriteTelemetry)

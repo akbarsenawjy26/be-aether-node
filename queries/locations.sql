@@ -3,16 +3,18 @@ INSERT INTO locations (guid, name, notes, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5);
 
 -- name: GetLocationByGUID :one
-SELECT guid, name, notes, created_at, updated_at, deleted_at
-FROM locations
-WHERE guid = $1 AND deleted_at IS NULL;
+SELECT l.guid, l.name, l.notes, l.created_at, l.updated_at, l.deleted_at,
+       (SELECT COUNT(*) FROM installation_points ip WHERE ip.location_guid = l.guid AND ip.deleted_at IS NULL) as device_count
+FROM locations l
+WHERE l.guid = $1 AND l.deleted_at IS NULL;
 
 -- name: ListLocations :many
-SELECT guid, name, notes, created_at, updated_at, deleted_at
-FROM locations
-WHERE deleted_at IS NULL
-  AND (name ILIKE $1 OR notes ILIKE $1)
-ORDER BY created_at DESC
+SELECT l.guid, l.name, l.notes, l.created_at, l.updated_at, l.deleted_at,
+       (SELECT COUNT(*) FROM installation_points ip WHERE ip.location_guid = l.guid AND ip.deleted_at IS NULL) as device_count
+FROM locations l
+WHERE l.deleted_at IS NULL
+  AND (l.name ILIKE $1 OR l.notes ILIKE $1)
+ORDER BY l.created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: CountLocations :one

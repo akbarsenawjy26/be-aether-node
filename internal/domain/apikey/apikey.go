@@ -14,6 +14,7 @@ var (
 type APIKey struct {
 	GUID       string     `json:"guid"`
 	KeyHash    string     `json:"-"`
+	KeyMasked  string     `json:"key_masked"`
 	Notes      string     `json:"notes"`
 	ExpireDate time.Time  `json:"expire_date"`
 	IsActive   bool       `json:"is_active"`

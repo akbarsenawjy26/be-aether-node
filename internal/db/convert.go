@@ -107,6 +107,58 @@ func LocationFromDB(in *Location) *location.Location {
 	return out
 }
 
+func LocationFromListRow(in *ListLocationsRow) *location.Location {
+	if in == nil {
+		return nil
+	}
+	out := &location.Location{
+		Name:        in.Name,
+		DeviceCount: in.DeviceCount,
+	}
+	if in.Guid.Valid {
+		out.GUID = uuid.UUID(in.Guid.Bytes).String()
+	}
+	if in.Notes.Valid {
+		out.Notes = in.Notes.String
+	}
+	if in.CreatedAt.Valid {
+		out.CreatedAt = in.CreatedAt.Time
+	}
+	if in.UpdatedAt.Valid {
+		out.UpdatedAt = in.UpdatedAt.Time
+	}
+	if in.DeletedAt.Valid {
+		out.DeletedAt = &in.DeletedAt.Time
+	}
+	return out
+}
+
+func LocationFromGetRow(in *GetLocationByGUIDRow) *location.Location {
+	if in == nil {
+		return nil
+	}
+	out := &location.Location{
+		Name:        in.Name,
+		DeviceCount: in.DeviceCount,
+	}
+	if in.Guid.Valid {
+		out.GUID = uuid.UUID(in.Guid.Bytes).String()
+	}
+	if in.Notes.Valid {
+		out.Notes = in.Notes.String
+	}
+	if in.CreatedAt.Valid {
+		out.CreatedAt = in.CreatedAt.Time
+	}
+	if in.UpdatedAt.Valid {
+		out.UpdatedAt = in.UpdatedAt.Time
+	}
+	if in.DeletedAt.Valid {
+		out.DeletedAt = &in.DeletedAt.Time
+	}
+	return out
+}
+
 // ─── InstallationPoint ───────────────────────────────────────────────────────
 
 func InstallationPointFromDB(in *InstallationPoint) *installation_point.InstallationPoint {
@@ -151,7 +203,15 @@ func APIKeyFromDB(in *Apikey) *apikey.APIKey {
 		IsActive: in.IsActive,
 	}
 	if in.Guid.Valid {
-		out.GUID = uuid.UUID(in.Guid.Bytes).String()
+		id := uuid.UUID(in.Guid.Bytes).String()
+		out.GUID = id
+		// Generate a placeholder mask since we don't store the original prefix
+		// Use last 4 chars of GUID to make it identifiable in the list
+		if len(id) > 4 {
+			out.KeyMasked = "sk_..." + id[len(id)-4:]
+		} else {
+			out.KeyMasked = "sk_****************"
+		}
 	}
 	if in.Notes.Valid {
 		out.Notes = in.Notes.String

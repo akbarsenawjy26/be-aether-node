@@ -37,6 +37,7 @@ func (s *apiKeyService) CreateAPIKey(ctx context.Context, req *domainAPIKey.Crea
 
 	apiKey := &domainAPIKey.APIKey{
 		KeyHash:    keyHash,
+		KeyMasked:  plainKey[:8] + "..." + plainKey[len(plainKey)-4:],
 		Notes:      req.Notes,
 		ExpireDate: expireDate,
 		IsActive:   req.IsActive,

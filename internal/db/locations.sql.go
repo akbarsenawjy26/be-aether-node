@@ -74,14 +74,25 @@ func (q *Queries) ExistsLocationByName(ctx context.Context, name string) (bool, 
 }
 
 const getLocationByGUID = `-- name: GetLocationByGUID :one
-SELECT guid, name, notes, created_at, updated_at, deleted_at
-FROM locations
-WHERE guid = $1 AND deleted_at IS NULL
+SELECT l.guid, l.name, l.notes, l.created_at, l.updated_at, l.deleted_at,
+       (SELECT COUNT(*) FROM installation_points ip WHERE ip.location_guid = l.guid AND ip.deleted_at IS NULL) as device_count
+FROM locations l
+WHERE l.guid = $1 AND l.deleted_at IS NULL
 `
 
-func (q *Queries) GetLocationByGUID(ctx context.Context, guid pgtype.UUID) (Location, error) {
+type GetLocationByGUIDRow struct {
+	Guid        pgtype.UUID        `json:"guid"`
+	Name        string             `json:"name"`
+	Notes       pgtype.Text        `json:"notes"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+	DeviceCount int64              `json:"device_count"`
+}
+
+func (q *Queries) GetLocationByGUID(ctx context.Context, guid pgtype.UUID) (GetLocationByGUIDRow, error) {
 	row := q.db.QueryRow(ctx, getLocationByGUID, guid)
-	var i Location
+	var i GetLocationByGUIDRow
 	err := row.Scan(
 		&i.Guid,
 		&i.Name,
@@ -89,16 +100,18 @@ func (q *Queries) GetLocationByGUID(ctx context.Context, guid pgtype.UUID) (Loca
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DeviceCount,
 	)
 	return i, err
 }
 
 const listLocations = `-- name: ListLocations :many
-SELECT guid, name, notes, created_at, updated_at, deleted_at
-FROM locations
-WHERE deleted_at IS NULL
-  AND (name ILIKE $1 OR notes ILIKE $1)
-ORDER BY created_at DESC
+SELECT l.guid, l.name, l.notes, l.created_at, l.updated_at, l.deleted_at,
+       (SELECT COUNT(*) FROM installation_points ip WHERE ip.location_guid = l.guid AND ip.deleted_at IS NULL) as device_count
+FROM locations l
+WHERE l.deleted_at IS NULL
+  AND (l.name ILIKE $1 OR l.notes ILIKE $1)
+ORDER BY l.created_at DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -108,15 +121,25 @@ type ListLocationsParams struct {
 	Offset int32  `json:"offset"`
 }
 
-func (q *Queries) ListLocations(ctx context.Context, arg ListLocationsParams) ([]Location, error) {
+type ListLocationsRow struct {
+	Guid        pgtype.UUID        `json:"guid"`
+	Name        string             `json:"name"`
+	Notes       pgtype.Text        `json:"notes"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+	DeviceCount int64              `json:"device_count"`
+}
+
+func (q *Queries) ListLocations(ctx context.Context, arg ListLocationsParams) ([]ListLocationsRow, error) {
 	rows, err := q.db.Query(ctx, listLocations, arg.Name, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Location{}
+	items := []ListLocationsRow{}
 	for rows.Next() {
-		var i Location
+		var i ListLocationsRow
 		if err := rows.Scan(
 			&i.Guid,
 			&i.Name,
@@ -124,6 +147,7 @@ func (q *Queries) ListLocations(ctx context.Context, arg ListLocationsParams) ([
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.DeviceCount,
 		); err != nil {
 			return nil, err
 		}

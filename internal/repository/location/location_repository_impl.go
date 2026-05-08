@@ -58,7 +58,7 @@ func (r *locationRepository) GetByGUID(ctx context.Context, guid string) (*domai
 		return nil, err
 	}
 
-	return db.LocationFromDB(&dbLoc), nil
+	return db.LocationFromGetRow(&dbLoc), nil
 }
 
 func (r *locationRepository) List(ctx context.Context, params domainLocation.ListParams) (*domainLocation.ListResult, error) {
@@ -88,7 +88,7 @@ func (r *locationRepository) List(ctx context.Context, params domainLocation.Lis
 
 	locations := make([]*domainLocation.Location, 0, len(dbLocs))
 	for i := range dbLocs {
-		locations = append(locations, db.LocationFromDB(&dbLocs[i]))
+		locations = append(locations, db.LocationFromListRow(&dbLocs[i]))
 	}
 
 	totalPages := int(total) / params.Limit

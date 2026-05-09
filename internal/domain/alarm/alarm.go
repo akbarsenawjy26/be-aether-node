@@ -36,6 +36,8 @@ type ListParams struct {
 	Status       *string
 	Limit        int
 	Page         int
+	StartTime    *time.Time
+	EndTime      *time.Time
 }
 
 type ListResult struct {

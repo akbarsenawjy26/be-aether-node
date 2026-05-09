@@ -38,6 +38,8 @@ func (h *AlarmHandler) GetAlarmHistory(c echo.Context) error {
 	deviceGUID := c.QueryParam("device_guid")
 	locationGUID := c.QueryParam("location_guid")
 	status := c.QueryParam("status")
+	startStr := c.QueryParam("start")
+	stopStr := c.QueryParam("stop")
 	limit, _ := strconv.Atoi(c.QueryParam("limit"))
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 
@@ -53,6 +55,16 @@ func (h *AlarmHandler) GetAlarmHistory(c echo.Context) error {
 	}
 	if status != "" {
 		params.Status = &status
+	}
+	if startStr != "" {
+		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
+			params.StartTime = &t
+		}
+	}
+	if stopStr != "" {
+		if t, err := time.Parse(time.RFC3339, stopStr); err == nil {
+			params.EndTime = &t
+		}
 	}
 
 	result, err := h.svc.ListAlarmHistory(ctx, params)

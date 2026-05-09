@@ -141,8 +141,10 @@ func main() {
 	e.Use(middleware.RequestLogger())
 	e.Use(echomiddleware.Recover())
 	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
-		AllowOrigins: cfg.Server.CORSOrigins(),
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete, http.MethodOptions},
+		AllowOrigins:     cfg.Server.CORSOrigins(),
+		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete, http.MethodOptions},
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, "X-Request-ID"},
+		AllowCredentials: true,
 	}))
 
 	// Rate limiting: 100 requests per minute per IP (global)
